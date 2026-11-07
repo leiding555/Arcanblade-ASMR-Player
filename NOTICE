@@ -1,0 +1,71 @@
+Arcanblade 第三方组件说明
+核对日期：2026-11-07
+
+原创内容
+
+Arcanblade 的原创代码及原创图标采用 MIT 许可证，详见根目录 LICENSE。
+第三方引擎、模型及其依赖文件的版权归各自权利人所有，分别适用其自身的
+许可证与版权声明。
+
+可选 AI 组件的提供方式
+
+以下 AI 引擎和模型不包含在 Arcanblade 源码仓库及播放器官方 Release 包中。
+用户可以通过程序中的安装入口主动从上游下载，并在本地使用。
+下载包内原有的 LICENSE、NOTICE 和版权声明应予保留；各组件的使用及分发
+须遵守对应上游版本的许可条件。
+
+1. Faster Whisper TransWithAI ChickenRice
+
+   提供者：TransWithAI / AI 汉化组
+   程序固定版本：v1.10
+   下载变体：对应硬件的 -translate.zip 分卷包
+   工具源码许可证：MIT
+   工具版权声明：Copyright (c) 2025 TransWithAI
+   上游项目：https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice
+   对应发行版：https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/releases/tag/v1.10
+   对应许可证：https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/blob/v1.10/LICENSE
+
+   翻译版包含下列翻译模型、VAD 模型及其他依赖；工具源码的 MIT 许可不能
+   代表整个下载包中所有文件的许可。
+
+2. whisper-large-v2-translate-zh-v0.2-st-ct2
+
+   模型发布者：chickenrice0721
+   用途：ChickenRice 日语音频转中文字幕
+   许可证：上游模型卡标明 Apache-2.0
+   来源与模型卡：https://huggingface.co/chickenrice0721/whisper-large-v2-translate-zh-v0.2-st-ct2
+
+3. Whisper-Vad-EncDec-ASMR-onnx
+
+   模型发布者：TransWithAI
+   用途：ChickenRice 音声语音活动检测（VAD）
+   许可证：上游模型卡标明 MIT
+   来源与模型卡：https://huggingface.co/TransWithAI/Whisper-Vad-EncDec-ASMR-onnx
+
+4. Faster-Whisper-XXL
+
+   提供者：Purfview
+   程序固定版本：r245.4
+   下载文件：Faster-Whisper-XXL_r245.4_windows.7z
+   许可信息：本次核对尚未确认该整包的明确许可证，需结合上游发行说明及
+   包内许可文件进一步核实。底层项目的许可证不能代替整包的许可核对。
+   上游项目：https://github.com/Purfview/whisper-standalone-win
+   对应发行页：https://github.com/Purfview/whisper-standalone-win/releases/tag/Faster-Whisper-XXL
+
+5. faster-whisper-large-v2
+
+   模型发布者：SYSTRAN
+   用途：Faster-Whisper-XXL 日语语音识别
+   程序固定模型修订：f0fe81560cb8b68660e564f55dd99207059c092e
+   许可证：该修订的上游模型卡标明 MIT
+   来源：https://huggingface.co/Systran/faster-whisper-large-v2
+   对应模型卡：https://huggingface.co/Systran/faster-whisper-large-v2/blob/f0fe81560cb8b68660e564f55dd99207059c092e/README.md
+
+其他运行时依赖
+
+播放器使用 Qt 等运行时库，其许可证及第三方依赖声明同样适用。
+实际运行包应按所分发的库和插件提供相应许可材料。
+Qt 6.8 许可说明：https://doc.qt.io/qt-6.8/licensing.html
+
+本文件是外部组件来源与许可信息索引。模型许可信息依据上述日期的上游
+模型卡；本次未逐文件审查各引擎发行包的全部依赖。

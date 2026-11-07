@@ -1,0 +1,51 @@
+# Qt Creator, CMake and local build output
+.public-export-manifest.json
+.qtcreator/
+*.user
+CMakeUserPresets.json
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+.vs/
+.vscode/
+
+# Compiled artifacts and distribution staging
+*.obj
+*.o
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.exe
+*.dll
+/dist/
+
+# Local databases and SQLite sidecars
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local settings, credentials and diagnostics
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.ini
+*.log
+*.tmp
+*.dmp
+Thumbs.db
+.DS_Store
