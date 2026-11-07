@@ -22,6 +22,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969da?style=flat-square" alt="许可证：MIT"></a>
 </p>
 
+<img src="assets/screenshots/mainscreen.png" width="960" alt="主界面">
+
 ## 主要功能
 
 - **音声作品管理**：导入本地作品，按作品与目录浏览、播放音轨，自动保存播放进度。
@@ -48,45 +50,11 @@
 
 <img src="assets/screenshots/Playback%20Details%20Page.png" width="960" alt="封面与同步字幕组成的播放详情页面">
 
-<details>
-<summary>查看 AI 字幕界面</summary>
-
-**离线直译**
-
-<img src="assets/screenshots/Offline%20literal%20translation.png" width="720" alt="日语音频直接生成中文字幕的离线直译页面">
-
-**日语识别**
-
-<img src="assets/screenshots/ASR.png" width="720" alt="日语音频生成日文字幕的识别页面">
-
-**作品级上下文润色与翻译**
-
-<img src="assets/screenshots/Subtitle%20Translation.png" width="720" alt="作品级上下文润色与翻译页面及启用选项">
-
-</details>
-
 ## 使用说明
 
 1. **导入作品**：点击 **导入作品 → 导入单个作品…**，选择作品目录；管理多个作品可使用 **添加扫描根目录…**。
 2. **开始播放**：选择作品，双击音轨，或点击 **播放此目录**。当前支持 MP3、WAV 音频。
 3. **查看或生成字幕**：本地字幕会按匹配规则自动关联，可通过底栏 **选择或管理字幕** 调整。没有字幕时，右键音轨选择 **离线直译…**，或先 **日语识别…**，再到 **AI 字幕** 页面翻译。
-
-<details>
-<summary>从源码构建</summary>
-
-使用 C++20、CMake 3.21+、Visual Studio 2022（MSVC x64）和 Qt 6.5+；已在 Qt 6.8.3 环境构建验证。需安装 Qt Core、Gui、Widgets、Multimedia、Sql、Network、Pdf 模块及 SQLite 驱动。
-
-可用 Qt Creator 打开 `CMakeLists.txt`，选择 MSVC 2022 x64 Kit，构建并运行 `AsmrPlayer` 目标；或在项目根目录使用 PowerShell（修改 Qt 路径以匹配本机安装）：
-
-```powershell
-$qtSdk = "C:/Qt/6.8.3/msvc2022_64"
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$qtSdk"
-cmake --build build --config Release --target AsmrPlayer --parallel 4
-& "$qtSdk/bin/windeployqt.exe" --release "build/Release/Arcanblade.exe"
-& "./build/Release/Arcanblade.exe"
-```
-
-</details>
 
 ## 许可证与致谢
 
