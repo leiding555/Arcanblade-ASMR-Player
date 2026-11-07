@@ -22,7 +22,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969da?style=flat-square" alt="许可证：MIT"></a>
 </p>
 
-<img src="assets/screenshots/mainscreen.png" width="960" alt="主界面">
+<p align="center">
+  <img src="assets/screenshots/mainscreen.png" width="960" alt="主界面">
+</p>
 
 ## 主要功能
 
@@ -44,11 +46,15 @@
 
 **作品库与同步字幕**
 
-<img src="assets/screenshots/Side%20subtitles.png" width="960" alt="作品库、音轨列表与侧栏同步字幕">
+<p align="center">
+  <img src="assets/screenshots/Side%20subtitles.png" width="960" alt="作品库、音轨列表与侧栏同步字幕">
+</p>
 
 **播放详情**
 
-<img src="assets/screenshots/Playback%20Details%20Page.png" width="960" alt="封面与同步字幕组成的播放详情页面">
+<p align="center">
+  <img src="assets/screenshots/Playback%20Details%20Page.png" width="960" alt="封面与同步字幕组成的播放详情页面">
+</p>
 
 ## 使用说明
 
@@ -62,35 +68,50 @@
 
 ### 二、AI 字幕
 
-#### 1. 离线直译：音频直接生成中文字幕
+<details>
+<summary><strong>1. 离线直译：音频直接生成中文字幕</strong></summary>
 
 1. 打开 **AI 字幕**，将 **生成方式** 设为 **离线直译**，进入 **组件与设置 → 安装组件**，选择下载安装位置，点击 **下载并准备**。如果已有完整组件，可通过 **选择已有组件…** 指定包含 `infer.exe` 的已解压目录。
 2. **使用 GPU 加速需下载匹配的组件版本**：按显卡与驱动选择 NVIDIA CUDA 或对应 AMD 架构版本，可使用软件的自动推荐。随后将 **运行方式** 设为 **GPU（低显存）** 或 **GPU（高显存）**；没有合适 GPU 时可选择 **CPU**。显卡、显存与版本要求见 [上游硬件与版本说明](https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/blob/v1.10/README.md)。
 3. 返回任务页，通过 **添加音频…** 或作品库的批量操作加入音频，点击 **开始生成**。支持批量任务，组件准备完成后无需联网。
 
-<img src="assets/screenshots/modelDownload.png" width="800" alt="离线直译组件安装、硬件版本选择与运行方式设置">
+<p align="center">
+  <img src="assets/screenshots/modelDownload.png" width="800" alt="离线直译组件安装、硬件版本选择与运行方式设置">
+</p>
 
-#### 2. 日语识别：先生成日文字幕
+</details>
+
+<details>
+<summary><strong>2. 日语识别：先生成日文字幕</strong></summary>
 
 1. 将 **生成方式** 切换为 **日语识别**，进入 **组件与设置 → 安装组件**，设置安装位置后点击 **下载并准备**，软件会准备识别引擎和模型。已有完整组件时，可通过 **选择已有组件…** 指定包含 `faster-whisper-xxl.exe` 的目录。
 2. 根据硬件选择 **GPU（低显存）／GPU（高显存）／CPU**。此流程的 GPU 加速使用 NVIDIA CUDA，组件说明见 [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)，硬件与运行环境可参考 [Faster Whisper 配置说明](https://github.com/SYSTRAN/faster-whisper#requirements)。
 3. 添加音频并点击 **开始生成**，支持批量任务。成功生成的日文字幕会**自动加入字幕翻译列表**；点击 **前往字幕翻译** 即可继续配置并启动翻译。
 
-<img src="assets/screenshots/modelDownload2.png" width="800" alt="日语识别引擎与模型的安装和运行方式设置">
+<p align="center">
+  <img src="assets/screenshots/modelDownload2.png" width="800" alt="日语识别引擎与模型的安装和运行方式设置">
+</p>
 
-#### 3. 字幕翻译：DeepSeek 润色与翻译
+</details>
+
+<details>
+<summary><strong>3. 字幕翻译：DeepSeek 润色与翻译</strong></summary>
 
 1. 在 [DeepSeek 开放平台](https://platform.deepseek.com/api_keys) 创建 API Key，接口说明见 [DeepSeek API 文档](https://api-docs.deepseek.com/zh-cn/)。
 2. 切换到 **字幕翻译 → 翻译设置**，服务选择 **DeepSeek**，选择模型，填写 API Key 并点击 **保存 Key**，可通过 **测试连接** 检查配置。
 3. 返回任务页，使用日语识别自动加入的字幕，或点击 **添加字幕…** 导入字幕；可按需勾选下列选项，再点击 **开始翻译**，支持批量任务。
 
-<img src="assets/screenshots/deepseek.png" width="800" alt="DeepSeek 服务、模型与 API Key 配置">
+<p align="center">
+  <img src="assets/screenshots/deepseek.png" width="800" alt="DeepSeek 服务、模型与 API Key 配置">
+</p>
 
 - **启用思考模式**：让模型先进行推理再输出，处理时间与用量可能增加。
 - **使用作品上下文**：参考作品目录内已扫描的文本、Markdown、PDF 等资料构建作品上下文；没有可用正文时，参考同作品的日语识别结果，先校正日文，再翻译为中文。**目前仅支持 DeepSeek，以及本软件生成并已入库、原音轨仍在库中的日语识别字幕**；仅手动添加外部字幕无法使用此模式。该选项对整批任务生效，会增加 token 用量与费用。
 - **自动绑定与使用**：作品库中的音轨翻译完成后，中文字幕会自动关联到原音轨；默认自动模式下使用最新生成的字幕。若曾手动指定默认字幕或选择不使用字幕，可在字幕管理中点击 **恢复默认**，恢复自动选择。
 
 API 翻译会将字幕及启用的作品上下文发送给所选服务，请自行确认需要发送的内容。
+
+</details>
 
 ### 翻译效果对比
 
