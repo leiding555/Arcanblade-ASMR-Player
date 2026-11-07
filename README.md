@@ -1,12 +1,26 @@
 <p align="center">
-  <img src="resources/branding/arcanblade-mark-black-128.png" width="88" height="88" alt="Arcanblade 图标">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="resources/branding/arcanblade-mark-256.png">
+    <img src="resources/branding/arcanblade-mark-black-256.png" width="160" height="160" alt="Arcanblade 图标">
+  </picture>
 </p>
 
-# Arcanblade
+<h1 align="center">Arcanblade (Windows)</h1>
 
-Arcanblade 是一款 Windows 音声作品管理与播放软件，支持本地字幕自动匹配、同步显示、离线生成中文字幕，以及大语言模型辅助的**作品级上下文润色与翻译**。
+<p align="center">
+  <strong>管理音声作品与字幕，AI识别音频并生成中文字幕。</strong>
+</p>
 
-**Windows 10 / 11 x64 · MIT**
+<p align="center">
+  面向 Windows 的 ASMR 音声管理与播放器，支持字幕自动匹配与同步显示。<br>
+  离线生成中文字幕，或先识别日文，再结合<strong>作品级上下文</strong>润色与翻译。
+</p>
+
+<p align="center">
+  <a href="https://github.com/leiding555/Arcanblade-ASMR-Player/releases/tag/v0.1.0-beta.1"><img src="https://img.shields.io/badge/release-v0.1.0--beta.1-7C5CE7?style=flat-square" alt="Release v0.1.0-beta.1"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D4?style=flat-square" alt="平台：Windows 10/11 x64">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969da?style=flat-square" alt="许可证：MIT"></a>
+</p>
 
 ## 主要功能
 
