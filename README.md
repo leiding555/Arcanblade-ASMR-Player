@@ -64,7 +64,7 @@
 ### 二、AI 字幕
 
 <details>
-<summary><strong>1. 离线直译：音频直接生成中文字幕</strong></summary>
+<summary><strong>1. 离线直译：音频直接生成中文字幕</strong>（点击展开 / 收起）</summary>
 
 1. 打开 **AI 字幕**，将 **生成方式** 设为 **离线直译**，进入 **组件与设置 → 安装组件**，选择下载安装位置，点击 **下载并准备**。如果已有完整组件，可通过 **选择已有组件…** 指定包含 `infer.exe` 的已解压目录。
 2. **使用 GPU 加速需下载匹配的组件版本**：按显卡与驱动选择 NVIDIA CUDA 或对应 AMD 架构版本，可使用软件的自动推荐。随后将 **运行方式** 设为 **GPU（低显存）** 或 **GPU（高显存）**；没有合适 GPU 时可选择 **CPU**。显卡、显存与版本要求见 [上游硬件与版本说明](https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/blob/v1.10/README.md)。
@@ -77,7 +77,7 @@
 </details>
 
 <details>
-<summary><strong>2. 日语识别：先生成日文字幕</strong></summary>
+<summary><strong>2. 日语识别：先生成日文字幕</strong>（点击展开 / 收起）</summary>
 
 1. 将 **生成方式** 切换为 **日语识别**，进入 **组件与设置 → 安装组件**，设置安装位置后点击 **下载并准备**，软件会准备识别引擎和模型。已有完整组件时，可通过 **选择已有组件…** 指定包含 `faster-whisper-xxl.exe` 的目录。
 2. 根据硬件选择 **GPU（低显存）／GPU（高显存）／CPU**。此流程的 GPU 加速使用 NVIDIA CUDA，组件说明见 [Faster-Whisper-XXL](https://github.com/Purfview/whisper-standalone-win)，硬件与运行环境可参考 [Faster Whisper 配置说明](https://github.com/SYSTRAN/faster-whisper#requirements)。
@@ -90,7 +90,7 @@
 </details>
 
 <details>
-<summary><strong>3. 字幕翻译：DeepSeek 润色与翻译</strong></summary>
+<summary><strong>3. 字幕翻译：DeepSeek 润色与翻译</strong>（点击展开 / 收起）</summary>
 
 1. 在 [DeepSeek 开放平台](https://platform.deepseek.com/api_keys) 创建 API Key，接口说明见 [DeepSeek API 文档](https://api-docs.deepseek.com/zh-cn/)。
 2. 切换到 **字幕翻译 → 翻译设置**，服务选择 **DeepSeek**，选择模型，填写 API Key 并点击 **保存 Key**，可通过 **测试连接** 检查配置。
