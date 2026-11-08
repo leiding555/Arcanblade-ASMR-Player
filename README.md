@@ -24,10 +24,10 @@
 
 <p align="center">
   <a href="#主要功能">主要功能</a> ·
-  <a href="#界面展示">界面展示</a> ·
   <a href="#使用说明">使用说明</a> ·
   <a href="#翻译效果对比">翻译效果对比</a> ·
   <a href="#常见问题">常见问题</a> ·
+  <a href="#界面展示">界面展示</a> ·
   <a href="#许可证与致谢">许可证与致谢</a>
 </p>
 
@@ -50,20 +50,6 @@
 | 识别后翻译 | 日语音频 → 日文字幕 → 作品级上下文润色与翻译 → 中文字幕 | 作品级上下文、译文质量 |
 
 引擎和模型不随播放器发行包附带，首次使用需联网下载。离线直译、日语识别均在本机运行；字幕翻译需自行配置 API 服务。
-
-## 界面展示
-
-**作品库与同步字幕**
-
-<p align="center">
-  <img src="assets/screenshots/Side%20subtitles.png" width="960" alt="作品库、音轨列表与侧栏同步字幕">
-</p>
-
-**播放详情**
-
-<p align="center">
-  <img src="assets/screenshots/Playback%20Details%20Page.png" width="960" alt="封面与同步字幕组成的播放详情页面">
-</p>
 
 ## 使用说明
 
@@ -134,10 +120,9 @@ API 翻译会将字幕及启用的作品上下文发送给所选服务，请自�
 
 ## 常见问题
 
-<details>
-<summary><strong>模型安装很慢、卡住或失败怎么办？</strong></summary>
+**模型安装很慢、卡住或失败怎么办？**
 
-软件从 GitHub 下载引擎组件，日语识别的 large-v2 模型从 Hugging Face 下载。网络不通或不稳定时，通常需要开启代理（梯子）后重试。如果仍无法下载，可以从上游手动下载，完整解压后在软件中设置组件路径：
+软件从 GitHub 下载引擎组件，日语识别的 large-v2 模型从 Hugging Face 下载。网络不通或不稳定时，通常需要开启代理（梯子）后重试，需要 **开启全局代理/Tun/虚拟网卡模式**。如果仍无法下载，可以从上游手动下载，完整解压后在软件中设置组件路径：
 
 1. **离线直译**：[ChickenRice v1.10 下载页](https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/releases/tag/v1.10)。选择适合显卡的 **translate 翻译版**，下载同一版本的全部分卷，合并为 ZIP 后完整解压，保留原有模型及依赖目录。在软件中选择包含 `infer.exe` 的目录。
 2. **日语识别**：[Faster-Whisper-XXL 下载页](https://github.com/Purfview/whisper-standalone-win/releases/tag/Faster-Whisper-XXL)。下载并完整解压 **`Faster-Whisper-XXL_r245.4_windows.7z`**，另外下载 [large-v2 模型（与软件匹配的版本）](https://huggingface.co/Systran/faster-whisper-large-v2/tree/f0fe81560cb8b68660e564f55dd99207059c092e) 的四个完整文件，放入组件目录下的 **`_models/faster-whisper-large-v2/`**（`_models` 带下划线）：
@@ -155,7 +140,19 @@ API 翻译会将字幕及启用的作品上下文发送给所选服务，请自�
 
 完成后，进入对应生成方式的 **组件与设置 → 选择已有组件…**，选择包含对应 EXE 的组件目录。日语识别可点击 **重新检查**，确认引擎和模型均已就绪后再开始任务。
 
-</details>
+## 界面展示
+
+**作品库与同步字幕**
+
+<p align="center">
+  <img src="assets/screenshots/Side%20subtitles.png" width="960" alt="作品库、音轨列表与侧栏同步字幕">
+</p>
+
+**播放详情**
+
+<p align="center">
+  <img src="assets/screenshots/Playback%20Details%20Page.png" width="960" alt="封面与同步字幕组成的播放详情页面">
+</p>
 
 ## 许可证与致谢
 
