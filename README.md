@@ -123,6 +123,28 @@ API 翻译会将字幕及启用的作品上下文发送给所选服务，请自�
 | 12:00–12:15 | 没错 头发变得挺长了对吧<br>因为前辈你说柚希的头发很漂亮嘛 | 是啊。长了不少吧。因为学长说过柚木的头发很漂亮嘛。 |
 | 12:16–12:26 | 从中学开始就没有剪过<br>那之后这头发一直都是我最自豪的 | 从初中起就没剪过哦。从那以后，这头发一直是我最大的骄傲。 |
 
+## 常见问题
+
+**模型安装很慢、卡住或失败怎么办？**
+
+软件从 GitHub 下载引擎组件，日语识别的 large-v2 模型从 Hugging Face 下载。网络不通或不稳定时，通常需要开启代理（梯子）后重试。如果仍无法下载，可以从上游手动下载，完整解压后在软件中设置组件路径：
+
+1. **离线直译**：[ChickenRice v1.10 下载页](https://github.com/TransWithAI/Faster-Whisper-TransWithAI-ChickenRice/releases/tag/v1.10)。选择适合显卡的 **translate 翻译版**，下载同一版本的全部分卷，合并为 ZIP 后完整解压，保留原有模型及依赖目录。在软件中选择包含 `infer.exe` 的目录。
+2. **日语识别**：[Faster-Whisper-XXL 下载页](https://github.com/Purfview/whisper-standalone-win/releases/tag/Faster-Whisper-XXL)。下载并完整解压 **`Faster-Whisper-XXL_r245.4_windows.7z`**，另外下载 [large-v2 模型（与软件匹配的版本）](https://huggingface.co/Systran/faster-whisper-large-v2/tree/f0fe81560cb8b68660e564f55dd99207059c092e) 的四个完整文件，放入组件目录下的 **`_models/faster-whisper-large-v2/`**（`_models` 带下划线）：
+
+```text
+组件目录/
+├─ faster-whisper-xxl.exe
+└─ _models/
+   └─ faster-whisper-large-v2/
+      ├─ config.json
+      ├─ model.bin
+      ├─ tokenizer.json
+      └─ vocabulary.txt
+```
+
+完成后，进入对应生成方式的 **组件与设置 → 选择已有组件…**，选择包含对应 EXE 的组件目录。日语识别可点击 **重新检查**，确认引擎和模型均已就绪后再开始任务。
+
 ## 许可证与致谢
 
 本项目原创代码及原创图标采用 [MIT License](LICENSE)。第三方引擎、模型和运行时依赖适用各自的许可证，来源与许可说明见 [NOTICE](NOTICE)。
