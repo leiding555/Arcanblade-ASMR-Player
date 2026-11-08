@@ -108,6 +108,7 @@ signals:
     void cancelImportRequested();
     void aiSubtitlesRequested();
     void workSelected(qint64 workId);
+    void workFolderRequested(qint64 workId);
     void workRemovalRequested(qint64 workId);
     void workReferencesRequested(qint64 workId);
     void trackPlayRequested(qint64 fileId);
@@ -211,6 +212,7 @@ private:
     QVector<qint64> m_batchMenuIds;
     QVector<qint64> m_translationMenuIds;
     QMenu *m_workContextMenu = nullptr;
+    QAction *m_openWorkFolderAction = nullptr;
     QAction *m_removeWorkAction = nullptr;
     QAction *m_workReferencesAction = nullptr;
     struct WorkMenuContext {

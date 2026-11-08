@@ -733,6 +733,16 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     m_worksView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_workContextMenu = new QMenu(m_worksView);
     m_workContextMenu->setObjectName(QStringLiteral("libraryWorkContextMenu"));
+    m_openWorkFolderAction = m_workContextMenu->addAction(QStringLiteral("打开作品文件夹"));
+    m_openWorkFolderAction->setObjectName(QStringLiteral("libraryOpenWorkFolderAction"));
+    m_openWorkFolderAction->setEnabled(false);
+    connect(m_openWorkFolderAction, &QAction::triggered, this, [this] {
+        const auto context = m_workMenuContext;
+        if (!canRequestWorkRemoval() || context.revision != m_workMenuRevision
+            || context.work.id <= 0 || !m_worksModel->matchesIdentity(context.work)) return;
+        invalidateWorkContextMenu();
+        emit workFolderRequested(context.work.id);
+    });
     m_workReferencesAction = m_workContextMenu->addAction(QStringLiteral("作品参考资料…"));
     m_workReferencesAction->setObjectName(QStringLiteral("libraryWorkReferencesAction"));
     m_workReferencesAction->setEnabled(false);
@@ -743,6 +753,7 @@ LibraryPanel::LibraryPanel(QWidget *parent)
         invalidateWorkContextMenu();
         emit workReferencesRequested(context.work.id);
     });
+    m_workContextMenu->addSeparator();
     m_removeWorkAction = m_workContextMenu->addAction(QStringLiteral("删除作品…"));
     m_removeWorkAction->setObjectName(QStringLiteral("libraryRemoveWorkAction"));
     m_removeWorkAction->setEnabled(false);
@@ -1484,6 +1495,7 @@ void LibraryPanel::invalidateWorkContextMenu()
 {
     ++m_workMenuRevision;
     m_workMenuContext = {};
+    m_openWorkFolderAction->setEnabled(false);
     m_removeWorkAction->setEnabled(false);
     m_workContextMenu->close();
     m_workReferencesAction->setEnabled(false);
@@ -1496,6 +1508,7 @@ void LibraryPanel::showWorkContextMenu(const QModelIndex &index, const QPoint &g
     if (m_closing || !work || work->id <= 0 || !m_worksView->isEnabled())
         return;
     m_workMenuContext = {m_workMenuRevision, *work};
+    m_openWorkFolderAction->setEnabled(canRequestWorkRemoval());
     m_removeWorkAction->setEnabled(canRequestWorkRemoval());
     m_workReferencesAction->setEnabled(canRequestWorkRemoval());
     m_workContextMenu->popup(globalPosition);

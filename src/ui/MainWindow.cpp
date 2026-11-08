@@ -1,6 +1,9 @@
 #include "ui/MainWindow.h"
 #include "ui/ApplicationBrand.h"
 #include "ui/PlayerMessageBox.h"
+#include "ui/UpdateNotificationController.h"
+#include "update/ApplicationVersion.h"
+#include "update/UpdatePackage.h"
 
 #include "playback/AudioPlayer.h"
 #include "playback/PlaybackProgressCoordinator.h"
@@ -32,6 +35,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileDialog>
@@ -57,12 +61,21 @@
 #include <QSystemTrayIcon>
 #include <QThreadPool>
 #include <QTimer>
+#include <QUuid>
 #include <QVBoxLayout>
 #include <QToolButton>
 
 #include <algorithm>
 #include <memory>
 #include <exception>
+#include <filesystem>
+
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace asmr {
 namespace {
@@ -177,12 +190,109 @@ MainWindow::MainWindow(const QString &libraryDatabasePath, QWidget *parent)
     // Application dispatch sees keys before focused child widgets. The filter
     // accepts only this window's central table or passive presentation areas.
     qApp->installEventFilter(this);
+    UpdateNotificationOptions updateOptions;
+    updateOptions.restartBlockedReason = [this] { return updateRestartBlockedReason(); };
+    updateOptions.requestRestart = [this](const UpdateDownloadResult &result) { restartForUpdate(result); };
+    m_updateNotifications = new UpdateNotificationController(
+        this, m_libraryPanel->settingsMenu(), &m_settings, nullptr, std::move(updateOptions), this);
+    connect(m_updateNotifications, &UpdateNotificationController::shutdownFinished,
+            this, &MainWindow::finishCloseIfReady);
+}
+
+void MainWindow::startAutomaticUpdateCheck()
+{
+    if (!m_closing && m_updateNotifications)
+        m_updateNotifications->startAutomaticCheck();
+}
+
+QString MainWindow::updateRestartBlockedReason() const
+{
+    if (m_closing) return QStringLiteral("软件正在关闭，请稍后重试。");
+    if (m_chickenRiceTranslateDialog && m_chickenRiceTranslateDialog->isBusy())
+        return QStringLiteral("AI 任务或模型准备正在进行，请结束后再重启更新。");
+    return {};
+}
+
+void MainWindow::restartForUpdate(const UpdateDownloadResult &result)
+{
+    if (m_closing || m_updateInstallPreparing || !m_updateNotifications) return;
+    const auto blocked = updateRestartBlockedReason();
+    if (!blocked.isEmpty() || result.state != UpdateDownloadState::Ready
+        || result.preparedDirectory.isEmpty()) {
+        m_updateNotifications->installPreparationFailed(blocked.isEmpty()
+            ? QStringLiteral("更新包尚未准备就绪，请重新下载。") : blocked);
+        return;
+    }
+    m_updateInstallPreparing = true;
+    m_updateInstallCancelled = std::make_shared<std::atomic_bool>(false);
+    const auto cancelled = m_updateInstallCancelled;
+    // Prevent new UI tasks while the already-verified package is checked again
+    // and the helper performs its ready handshake. No process has exited yet.
+    setEnabled(false);
+    const QString cache = m_updateSessionRootTestOverride.isEmpty()
+        ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+              .filePath(QStringLiteral("updates")) : m_updateSessionRootTestOverride;
+    const QString session = QDir(cache).filePath(QStringLiteral("install-")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces));
+    auto promise = std::make_shared<QPromise<UpdateInstallPreparation>>();
+    auto *watcher = new QFutureWatcher<UpdateInstallPreparation>(this);
+    connect(watcher, &QFutureWatcher<UpdateInstallPreparation>::finished, this,
+            [this, watcher, cancelled] {
+        const auto preparation = watcher->result();
+        watcher->deleteLater();
+        m_updateInstallPreparing = false;
+        if (m_closing || cancelled->load()) {
+            cancelPreparedUpdate(preparation);
+            finishCloseIfReady();
+            return;
+        }
+        setEnabled(true);
+        QString error = preparation.error;
+        const auto blockedNow = updateRestartBlockedReason();
+        if (error.isEmpty() && !blockedNow.isEmpty()) error = blockedNow;
+        if (error.isEmpty() && !commitPreparedUpdate(preparation, &error)) {
+            if (error.isEmpty()) error = QStringLiteral("无法启动更新安装，请从发布页手动下载。");
+        }
+        if (!error.isEmpty()) {
+            cancelPreparedUpdate(preparation);
+            m_updateNotifications->installPreparationFailed(error);
+            return;
+        }
+        // The helper has acknowledged readiness but still waits for THIS
+        // process to terminate. Existing close barriers save progress/drain
+        // workers; a delayed or failed close never permits early replacement.
+        close();
+    });
+    watcher->setFuture(promise->future());
+    const auto hook = m_beforeUpdatePrepareTestHook;
+    QThreadPool::globalInstance()->start([promise, prepared = result.preparedDirectory,
+        target = QCoreApplication::applicationDirPath(), current = applicationBuildVersion(),
+        version = result.release.version, manifestSha256 = result.preparedManifestSha256,
+        session, cancelled, hook] {
+        promise->start();
+        UpdateInstallPreparation preparation;
+        try {
+            if (hook) (*hook)();
+            if (!cancelled->load()) {
+                preparation = prepareUpdateInstall(prepared, target, current, version, session, *cancelled, manifestSha256);
+                if (preparation.success() && !launchPreparedUpdate(preparation, *cancelled, &preparation.error)) {
+                    if (preparation.error.isEmpty()) preparation.error = QStringLiteral("更新程序启动失败。");
+                    cancelPreparedUpdate(preparation);
+                }
+            }
+        } catch (...) { preparation.error = QStringLiteral("准备更新失败，请重试或从发布页手动下载。"); }
+        promise->addResult(std::move(preparation));
+        promise->finish();
+    });
 }
 
 // Keep subtitles independent of the native main-window owner/minimize group.
 // The unique_ptr still destroys the window with MainWindow, including while visible.
 MainWindow::~MainWindow()
 {
+    if (m_updateInstallCancelled) m_updateInstallCancelled->store(true);
+    if (m_updateNotifications) m_updateNotifications->shutdown();
+    if (m_workFolderCancelled) m_workFolderCancelled->store(true);
     if (qApp) qApp->removeEventFilter(this);
     if (m_chickenRiceTranslateDialog) {
         disconnect(m_chickenRiceTranslateDialog, nullptr, this, nullptr);
@@ -463,6 +573,63 @@ QString libraryDiagnostics(const QVector<LibraryDiagnostic> &diagnostics)
     return lines.join(QLatin1Char('\n'));
 }
 
+bool sameWorkIdentity(const LibraryWork &first, const LibraryWork &second)
+{
+    return first.id == second.id && first.rootPath == second.rootPath
+        && first.importedAtMs == second.importedAtMs;
+}
+
+struct WorkFolderResult {
+    QString directory;
+    QString error;
+};
+
+// Worker-only: do not follow a root/ancestor that has become a link, and prove
+// that the exact registered work still exists after checking its directory.
+WorkFolderResult checkedWorkFolder(const QString &database, const LibraryWork &expected,
+                                   const std::atomic_bool &cancelled)
+{
+    const QString root = ScanRootStore::normalizePath(expected.rootPath);
+    if (root.isEmpty()) return {{}, QStringLiteral("作品根目录路径无效，未打开。")};
+    QString current = root;
+    for (;;) {
+        if (cancelled.load()) return {};
+        const QFileInfo info(current);
+        if (!info.isDir() || !info.isReadable() || info.isSymLink() || info.isJunction())
+            return {{}, QStringLiteral("作品根目录不存在、无法访问或包含链接，未打开。")};
+#ifdef Q_OS_WIN
+        const auto native = QDir::toNativeSeparators(current);
+        const auto attributes = GetFileAttributesW(reinterpret_cast<LPCWSTR>(native.utf16()));
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+            return {{}, QStringLiteral("作品根目录不存在、无法访问或包含链接，未打开。")};
+#endif
+        const QString parent = info.absolutePath();
+        if (parent == current || QDir(current).isRoot()) break;
+        current = parent;
+    }
+    std::error_code error;
+#ifdef Q_OS_WIN
+    const std::filesystem::path path(root.toStdWString());
+#else
+    const std::filesystem::path path(QFile::encodeName(root).constData());
+#endif
+    const std::filesystem::directory_iterator entries(path, error);
+    if (error) return {{}, QStringLiteral("作品根目录无法访问，未打开。")};
+    if (cancelled.load()) return {};
+    LibraryRepository repository(database);
+    const auto opened = repository.open();
+    if (!opened.success)
+        return {{}, QStringLiteral("无法核验作品身份：") + libraryDiagnostics(opened.diagnostics)};
+    const auto works = repository.works();
+    if (!works.success)
+        return {{}, QStringLiteral("无法核验作品身份：") + libraryDiagnostics(works.diagnostics)};
+    const auto found = std::find_if(works.works.cbegin(), works.works.cend(), [&expected](const auto &work) {
+        return sameWorkIdentity(work, expected);
+    });
+    if (found == works.works.cend()) return {{}, QStringLiteral("作品已删除或身份已变化，请重新选择。")};
+    return cancelled.load() ? WorkFolderResult{} : WorkFolderResult{root, {}};
+}
+
 QString importDiagnostics(const LibraryImportTaskResult &result)
 {
     QStringList lines;
@@ -572,6 +739,8 @@ void MainWindow::connectLibrary()
             this, &MainWindow::refreshLibrary);
     connect(m_libraryPanel, &LibraryPanel::workRemovalRequested,
             this, &MainWindow::requestLibraryWorkRemoval);
+    connect(m_libraryPanel, &LibraryPanel::workFolderRequested,
+            this, &MainWindow::openWorkFolder);
     // submit() emits its first state synchronously. Queue all notifications so
     // the accepted ID is installed before any of them can update the panel.
     connect(m_libraryImportService, &LibraryImportService::stateChanged,
@@ -603,6 +772,52 @@ void MainWindow::openLibraryDirectory()
         this, QStringLiteral("导入作品目录"), QString(), QFileDialog::ShowDirsOnly);
     if (!directory.isEmpty())
         submitLibraryImport(directory);
+}
+
+void MainWindow::openWorkFolder(qint64 workId)
+{
+    if (m_closing || !m_libraryDatabaseReady || libraryScanBusy()
+        || m_libraryQueryInProgress || m_libraryQueryPending || workId <= 0
+        || m_removedLibraryWorkIds.contains(workId)) return;
+    const auto found = std::find_if(m_libraryWorksSnapshot.cbegin(), m_libraryWorksSnapshot.cend(),
+        [workId](const auto &work) { return work.id == workId; });
+    if (found == m_libraryWorksSnapshot.cend()) return;
+    const auto expected = *found;
+    if (m_workFolderCancelled) m_workFolderCancelled->store(true);
+    m_workFolderCancelled = std::make_shared<std::atomic_bool>(false);
+    const auto cancelled = m_workFolderCancelled;
+    const auto generation = ++m_workFolderGeneration;
+    const auto libraryGeneration = m_libraryQueryGeneration;
+    ++m_workFolderWorkers;
+    auto promise = std::make_shared<QPromise<WorkFolderResult>>();
+    auto *watcher = new QFutureWatcher<WorkFolderResult>(this);
+    connect(watcher, &QFutureWatcher<WorkFolderResult>::finished, this,
+        [this, watcher, generation, libraryGeneration, expected, cancelled] {
+        const auto result = watcher->result();
+        watcher->deleteLater(); --m_workFolderWorkers;
+        const auto current = std::find_if(m_libraryWorksSnapshot.cbegin(), m_libraryWorksSnapshot.cend(),
+            [&expected](const auto &work) { return sameWorkIdentity(work, expected); });
+        if (!m_closing && !cancelled->load() && generation == m_workFolderGeneration
+            && libraryGeneration == m_libraryQueryGeneration && !libraryScanBusy()
+            && !m_libraryQueryInProgress && !m_libraryQueryPending
+            && !m_removedLibraryWorkIds.contains(expected.id) && current != m_libraryWorksSnapshot.cend()) {
+            if (!result.error.isEmpty()) m_libraryPanel->setImportError(result.error);
+            else if (!result.directory.isEmpty() && !QDesktopServices::openUrl(QUrl::fromLocalFile(result.directory)))
+                m_libraryPanel->setImportError(QStringLiteral("无法打开作品文件夹。"));
+        }
+        finishCloseIfReady();
+    });
+    watcher->setFuture(promise->future());
+    const auto hook = m_beforeWorkFolderCheckTestHook;
+    QThreadPool::globalInstance()->start([promise, database = m_libraryDatabasePath, expected, cancelled, hook] {
+        promise->start();
+        WorkFolderResult result;
+        try {
+            if (hook) (*hook)();
+            if (!cancelled->load()) result = checkedWorkFolder(database, expected, *cancelled);
+        } catch (...) { result.error = QStringLiteral("检查作品文件夹失败，请重试。"); }
+        promise->addResult(std::move(result)); promise->finish();
+    });
 }
 
 void MainWindow::submitLibraryImport(const QString &directory, const DirectoryScanOptions &options)
@@ -1055,8 +1270,10 @@ void MainWindow::startSubtitleBadgeQuery()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (m_closing && m_libraryShutdownFinished && m_batchShutdownFinished && m_rootShutdownFinished
-        && !m_libraryQueryInProgress && !m_subtitleBadgeQueryInProgress
+    if (m_closing && !m_updateInstallPreparing
+        && (!m_updateNotifications || m_updateNotifications->isShutdownFinished())
+        && m_libraryShutdownFinished && m_batchShutdownFinished && m_rootShutdownFinished
+        && !m_libraryQueryInProgress && !m_subtitleBadgeQueryInProgress && m_workFolderWorkers == 0
         && !m_audioOpenInProgress && !m_queuePreparationInProgress
         && !m_subtitleQueryInProgress && !m_subtitleLoadInProgress
         && !m_subtitleChoiceQueryInProgress && !m_preferenceWriteInProgress
@@ -1076,6 +1293,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
         return;
     finishPlaybackProgressForClose();
     m_closing = true;
+    if (m_updateInstallCancelled) m_updateInstallCancelled->store(true);
+    if (m_updateNotifications) m_updateNotifications->shutdown();
+    ++m_workFolderGeneration;
+    if (m_workFolderCancelled) m_workFolderCancelled->store(true);
     m_aiSubtitlePendingResults.clear();
     m_aiSubtitlePendingWorks.clear();
     if (m_chickenRiceTranslateDialog) {
@@ -1151,8 +1372,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
 void MainWindow::finishCloseIfReady()
 {
-    if (!m_closing || !m_libraryShutdownFinished || !m_batchShutdownFinished || !m_rootShutdownFinished || m_libraryQueryInProgress
-        || m_subtitleBadgeQueryInProgress
+    if (!m_closing || m_updateInstallPreparing
+        || (m_updateNotifications && !m_updateNotifications->isShutdownFinished())
+        || !m_libraryShutdownFinished || !m_batchShutdownFinished || !m_rootShutdownFinished || m_libraryQueryInProgress
+        || m_subtitleBadgeQueryInProgress || m_workFolderWorkers > 0
         || m_audioOpenInProgress || m_queuePreparationInProgress || m_subtitleQueryInProgress
         || m_subtitleLoadInProgress || m_subtitleChoiceQueryInProgress
         || m_preferenceWriteInProgress || !m_preferenceRequests.isEmpty()

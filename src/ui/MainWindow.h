@@ -49,6 +49,7 @@ class SubtitlePanel;
 class LibraryPanel;
 class BoundSubtitleDialog;
 class ChickenRiceTranslateDialog;
+struct UpdateDownloadResult;
 struct GpuDetectionResult;
 struct AiSubtitleTaskResult;
 class BatchImportPreviewDialog;
@@ -64,6 +65,7 @@ class TrackDurationService;
 class CoverSelectionDialog;
 class WorkEditDialog;
 class WorkReferenceDialog;
+class UpdateNotificationController;
 struct PlaybackProgressTaskResult;
 struct AudioFileValidationResult;
 struct SubtitleFileLoadResult;
@@ -77,6 +79,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     explicit MainWindow(const QString &libraryDatabasePath, QWidget *parent = nullptr);
     ~MainWindow() override;
+    void startAutomaticUpdateCheck();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -98,6 +101,14 @@ private:
     friend class MainWindowQueueTests;
     friend class MainWindowTitleBarTests;
     friend class MainWindowArtworkTests;
+    friend class MainWindowUpdateTests;
+
+    [[nodiscard]] QString updateRestartBlockedReason() const;
+    void restartForUpdate(const UpdateDownloadResult &result);
+    bool m_updateInstallPreparing = false;
+    std::shared_ptr<std::atomic_bool> m_updateInstallCancelled;
+    std::shared_ptr<const std::function<void()>> m_beforeUpdatePrepareTestHook;
+    QString m_updateSessionRootTestOverride;
 
     void connectTrackDurations();
     void requestVisibleTrackDurations(qint64 workId, const QVector<qint64> &fileIds);
@@ -380,6 +391,11 @@ private:
     // with the existing first-work fallback used by startup/ordinary refresh.
     void refreshLibrary(qint64 preferredWorkId = 0);
     void startLibraryQuery();
+    void openWorkFolder(qint64 workId);
+    quint64 m_workFolderGeneration = 0;
+    int m_workFolderWorkers = 0;
+    std::shared_ptr<std::atomic_bool> m_workFolderCancelled;
+    std::shared_ptr<const std::function<void()>> m_beforeWorkFolderCheckTestHook;
     // A binding edit refreshes only badges; it must not reload playback or reset browsing.
     void refreshSubtitleBadges(qint64 workId);
     void startSubtitleBadgeQuery();
@@ -576,6 +592,7 @@ private:
     bool m_libraryShutdownFinished = false;
     bool m_closeScheduled = false;
     QSettings m_settings;
+    UpdateNotificationController *m_updateNotifications = nullptr;
     AudioPlayer *m_audioPlayer;
     std::unique_ptr<FloatingSubtitleWindow> m_floatingSubtitleWindow;
     SubtitleSynchronizer m_subtitleSynchronizer;

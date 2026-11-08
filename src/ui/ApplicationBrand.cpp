@@ -1,4 +1,5 @@
 #include "ApplicationBrand.h"
+#include "update/ApplicationVersion.h"
 
 #include <QApplication>
 #include <QResource>
@@ -48,6 +49,7 @@ void configureApplicationBranding(QApplication &application)
     // Legacy data remains in its original namespace; no migration or fallback.
     application.setOrganizationName(QStringLiteral("Arcanblade"));
     application.setApplicationName(QStringLiteral("Arcanblade"));
+    application.setApplicationVersion(applicationBuildVersion());
     application.setApplicationDisplayName(applicationDisplayName());
     application.setWindowIcon(applicationIcon());
 }

@@ -7,13 +7,83 @@ if(CMAKE_GENERATOR STREQUAL "NMake Makefiles"
         OR CMAKE_GENERATOR STREQUAL "NMake Makefiles JOM")
     set(CMAKE_DEPENDS_USE_COMPILER FALSE)
 endif()
-project(AsmrPlayer VERSION 0.1.0 LANGUAGES CXX)
+# One release version drives the program, Windows resources and package names.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" ARCANBLADE_VERSION)
+string(STRIP "${ARCANBLADE_VERSION}" ARCANBLADE_VERSION)
+if(NOT ARCANBLADE_VERSION MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")
+    message(FATAL_ERROR "VERSION must contain one valid semantic version, such as 0.1.0-beta.2")
+endif()
+set(ARCANBLADE_VERSION_MAJOR "${CMAKE_MATCH_1}")
+set(ARCANBLADE_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(ARCANBLADE_VERSION_PATCH "${CMAKE_MATCH_3}")
+set(_arcanblade_prerelease "${CMAKE_MATCH_4}")
+foreach(_part MAJOR MINOR PATCH)
+    string(LENGTH "${ARCANBLADE_VERSION_${_part}}" _part_length)
+    if(_part_length GREATER 5 OR ARCANBLADE_VERSION_${_part} GREATER 65535)
+        message(FATAL_ERROR "VERSION numeric components must fit the Windows file version range 0..65535")
+    endif()
+endforeach()
+if(_arcanblade_prerelease)
+    string(SUBSTRING "${_arcanblade_prerelease}" 1 -1 _arcanblade_prerelease)
+    string(REPLACE "." ";" _arcanblade_prerelease "${_arcanblade_prerelease}")
+    foreach(_identifier IN LISTS _arcanblade_prerelease)
+        if(_identifier MATCHES "^0[0-9]+$")
+            message(FATAL_ERROR "VERSION numeric prerelease identifiers must not contain leading zeroes")
+        endif()
+    endforeach()
+endif()
+project(AsmrPlayer VERSION "${ARCANBLADE_VERSION_MAJOR}.${ARCANBLADE_VERSION_MINOR}.${ARCANBLADE_VERSION_PATCH}" LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Multimedia Sql Network Pdf)
 qt_standard_project_setup()
+
+add_library(AsmrVersion STATIC src/update/ApplicationVersion.h src/update/ApplicationVersion.cpp)
+target_include_directories(AsmrVersion PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(AsmrVersion PUBLIC Qt6::Core)
+target_compile_definitions(AsmrVersion PUBLIC
+    ARCANBLADE_VERSION="${ARCANBLADE_VERSION}"
+    ARCANBLADE_VERSION_MAJOR=${ARCANBLADE_VERSION_MAJOR}
+    ARCANBLADE_VERSION_MINOR=${ARCANBLADE_VERSION_MINOR}
+    ARCANBLADE_VERSION_PATCH=${ARCANBLADE_VERSION_PATCH})
+
+add_library(AsmrZipArchive STATIC
+    src/ai/ChickenRiceArchive.h src/ai/ChickenRiceArchive.cpp)
+target_include_directories(AsmrZipArchive PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(AsmrZipArchive PUBLIC Qt6::Core)
+
+add_library(AsmrUpdates STATIC
+    src/update/SemanticVersion.h src/update/SemanticVersion.cpp
+    src/update/UpdateCheckService.h src/update/UpdateCheckService.cpp
+    src/update/UpdateDownloadService.h src/update/UpdateDownloadService.cpp
+    src/update/UpdatePackage.h src/update/UpdatePackage.cpp
+    src/update/UpdateInstaller.h src/update/UpdateInstaller.cpp)
+target_link_libraries(AsmrUpdates PUBLIC AsmrVersion AsmrZipArchive Qt6::Network)
+if(WIN32)
+    target_link_libraries(AsmrUpdates PRIVATE bcrypt user32)
+    # This helper runs from the update cache after the player exits. It must
+    # not depend on Qt or DLLs in the installation it is about to replace.
+    add_executable(ArcanbladeUpdater WIN32
+        src/update/UpdaterMain.cpp src/update/UpdateInstaller.h src/update/UpdateInstaller.cpp)
+    set_target_properties(ArcanbladeUpdater PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+    target_include_directories(ArcanbladeUpdater PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_compile_definitions(ArcanbladeUpdater PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(ArcanbladeUpdater PRIVATE bcrypt shell32 user32)
+    if(MSVC)
+        set_property(TARGET ArcanbladeUpdater PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_compile_options(ArcanbladeUpdater PRIVATE /W4 /utf-8)
+    endif()
+endif()
+foreach(_update_target AsmrVersion AsmrUpdates AsmrZipArchive)
+    if(MSVC)
+        target_compile_options(${_update_target} PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(${_update_target} PRIVATE -Wall -Wextra)
+    endif()
+endforeach()
 
 add_library(AsmrSubtitle STATIC
     src/subtitle/GeneratedSubtitleInfo.h
@@ -109,13 +179,12 @@ endif()
 
 add_library(AsmrChickenRice STATIC
     src/ai/ChickenRicePackage.h src/ai/ChickenRicePackage.cpp
-    src/ai/ChickenRiceArchive.h src/ai/ChickenRiceArchive.cpp
     src/ai/ChickenRiceInstallService.h src/ai/ChickenRiceInstallService.cpp
     src/ai/ChickenRiceTranslateService.h src/ai/ChickenRiceTranslateService.cpp
     src/ai/ChickenRiceGenerationOptions.h src/ai/ChickenRiceGenerationOptions.cpp
 )
 target_include_directories(AsmrChickenRice PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(AsmrChickenRice PUBLIC AsmrGpu AsmrAiSubtitle AsmrSubtitle Qt6::Core Qt6::Network)
+target_link_libraries(AsmrChickenRice PUBLIC AsmrZipArchive AsmrGpu AsmrAiSubtitle AsmrSubtitle Qt6::Core Qt6::Network)
 if(MSVC)
     target_compile_options(AsmrChickenRice PRIVATE /W4 /utf-8)
 else()
@@ -229,7 +298,7 @@ add_library(AsmrWindowFrame STATIC
     src/ui/PlayerMessageBox.cpp
 )
 target_include_directories(AsmrWindowFrame PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(AsmrWindowFrame PUBLIC Qt6::Widgets)
+target_link_libraries(AsmrWindowFrame PUBLIC Qt6::Widgets AsmrVersion)
 qt_add_resources(AsmrWindowFrame input_controls
     PREFIX "/input-controls"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/input-controls"
@@ -269,6 +338,15 @@ if(MSVC)
     target_compile_options(AsmrWindowFrame PRIVATE /W4 /utf-8)
 else()
     target_compile_options(AsmrWindowFrame PRIVATE -Wall -Wextra)
+endif()
+
+add_library(AsmrUpdateUi STATIC
+    src/ui/UpdateNotificationController.h src/ui/UpdateNotificationController.cpp)
+target_link_libraries(AsmrUpdateUi PUBLIC AsmrUpdates AsmrWindowFrame Qt6::Widgets)
+if(MSVC)
+    target_compile_options(AsmrUpdateUi PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(AsmrUpdateUi PRIVATE -Wall -Wextra)
 endif()
 
 add_library(AsmrTranslationApi STATIC
@@ -327,6 +405,9 @@ qt_add_executable(AsmrPlayer
 
 target_sources(AsmrPlayer PRIVATE ${_audio_file_validation_sources} ${_library_subtitle_playback_sources})
 set_target_properties(AsmrPlayer PROPERTIES OUTPUT_NAME Arcanblade)
+if(WIN32)
+    add_dependencies(AsmrPlayer ArcanbladeUpdater)
+endif()
 target_include_directories(AsmrPlayer PRIVATE src)
 if(WIN32)
     enable_language(RC)
@@ -338,6 +419,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(AsmrPlayer PRIVATE
+    AsmrUpdateUi
     AsmrTranslationSettingsUi
     AsmrChickenRice
     AsmrFasterWhisper
