@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leiding555/Arcanblade-ASMR-Player/releases/tag/v0.1.0-beta.1"><img src="https://img.shields.io/badge/release-v0.1.0--beta.1-7C5CE7?style=flat-square" alt="Release v0.1.0-beta.1"></a>
+  <a href="https://github.com/leiding555/AsmrPlayer-Arcanblade/releases/tag/v0.1.0-beta.1"><img src="https://img.shields.io/badge/release-v0.1.0--beta.1-7C5CE7?style=flat-square" alt="Release v0.1.0-beta.1"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D4?style=flat-square" alt="平台：Windows 10/11 x64">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969da?style=flat-square" alt="许可证：MIT"></a>
 </p>
