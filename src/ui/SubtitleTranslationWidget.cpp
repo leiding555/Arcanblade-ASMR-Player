@@ -1148,8 +1148,9 @@ void SubtitleTranslationWidget::updateControls()
     const bool ready = !m_shuttingDown && !busy && !m_historyLoading && m_historyWritable && m_service;
     const auto settings = busy ? m_startSettings : currentSettings();
     const bool deepSeek = settings.provider == TranslationApiProvider::DeepSeek;
-    m_serviceLabel->setText(deepSeek ? translationApiModelDisplayName(settings.model)
-        : QStringLiteral("自定义兼容服务 · %1").arg(settings.model));
+    m_serviceLabel->setText((deepSeek ? translationApiModelDisplayName(settings.model)
+        : QStringLiteral("自定义兼容服务 · %1").arg(settings.model))
+        + QStringLiteral(" · 日文字幕 → 中文字幕"));
     m_configure->setVisible(!validateTranslationApiSettings(settings).isEmpty());
     {
         const QSignalBlocker blocker(m_thinking);

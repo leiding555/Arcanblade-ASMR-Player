@@ -478,7 +478,7 @@ LibraryOperationResult LibraryRepository::prepareSchema(bool writing)
             QStringLiteral("旧开发数据库需要先备份再重建（当前格式 v%1）；未迁移或清空原数据。").arg(schemaVersion));
     }
     if (!writing && version != schemaVersion) {
-        // Creation and additive v4/v5 upgrades release this read snapshot,
+        // Creation and additive v4-v7 upgrades release this read snapshot,
         // acquire the writer, then re-read and validate the entire schema.
         // A concurrent opener may already have completed the same operation.
         if (!m_database.rollback())
@@ -631,7 +631,7 @@ LibraryOperationResult LibraryRepository::prepareSchema(bool writing)
         return reject(LibraryDiagnosticCode::InvalidSchema,
                       QStringLiteral("The library database contains invalid playback progress records."));
     }
-    if (version == 4 || version == 5) {
+    if (version >= 4 && version < schemaVersion) {
         // Only missing tables are added. No existing row, UUID, stable
         // ID, AUTOINCREMENT watermark, trigger or index is rewritten.
         QSqlQuery query(m_database);

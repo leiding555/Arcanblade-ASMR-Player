@@ -1,6 +1,8 @@
 #pragma once
 
 #include "library/LibraryImportService.h"
+#include "library/WorkCategoryTypes.h"
+#include "artwork/WorkCoverService.h"
 #include "ui/LibraryTrackTreeModel.h"
 
 #include <QHash>
@@ -25,10 +27,12 @@ class QTableView;
 class QToolButton;
 class QVBoxLayout;
 class QTimer;
+class QStandardItemModel;
 
 namespace asmr {
 
 class LibraryWorksModel;
+class LibraryWorksFilterModel;
 class CoverArtWidget;
 struct CoverArtResult;
 
@@ -47,6 +51,7 @@ public:
         MissingRole,
         PlayingRole,
         DirectoryRole,
+        CategoryIdRole,
     };
 
     explicit LibraryPanel(QWidget *parent = nullptr);
@@ -56,6 +61,10 @@ public:
     void setLibrary(const QVector<LibraryWork> &works,
                     const QVector<LibraryFile> &files, qint64 selectedWorkId,
                     const QSet<qint64> &subtitleAudioFileIds = {});
+    void setCategories(const QVector<WorkCategory> &categories,
+                       const QVector<WorkCategoryMembership> &memberships);
+    void setCategoryCover(qint64 categoryId, quint64 revision, const CoverArtResult &result);
+    void setCategoryMutationBusy(bool busy);
     // Playback identity is independent of the currently browsed work/selection.
     void setPlayingTrack(qint64 workId, qint64 fileId);
     void setQuerying(bool querying);
@@ -121,6 +130,11 @@ signals:
     void chooseCoverRequested(qint64 workId);
     void restoreAutoCoverRequested(qint64 workId);
     void workCoverDemandChanged(qint64 selectedWorkId, const QVector<qint64> &visibleWorkIds);
+    void createCategoryRequested(qint64 workId = 0);
+    void renameCategoryRequested(qint64 categoryId);
+    void removeCategoryRequested(qint64 categoryId);
+    void workCategoryRequested(qint64 workId, qint64 categoryId, bool present);
+    void categoryCoverDemandChanged(const QVector<WorkCategoryCoverDemand> &categories);
     void trackDurationDemandChanged(qint64 workId, const QVector<qint64> &visibleAudioFileIds);
 
 protected:
@@ -142,6 +156,14 @@ private:
     void showWorkContextMenu(const QModelIndex &index, const QPoint &globalPosition);
     [[nodiscard]] bool canRequestWorkRemoval() const;
     void invalidateWorkContextMenu();
+    void showCategoryContextMenu(const QModelIndex &index, const QPoint &globalPosition);
+    void invalidateCategoryContextMenu();
+    void setSidebarLocation(bool categories, qint64 categoryId = 0);
+    void updateCategoryFilter();
+    void rebuildCategoryRows();
+    void publishCategoryCoverDemand(bool force);
+    [[nodiscard]] bool canMutateCategories() const;
+    [[nodiscard]] QVector<qint64> categoryWorkIds(qint64 categoryId) const;
     [[nodiscard]] bool isCurrentPageIndex(const QModelIndex &index) const;
     void navigateToDirectory(const QString &path, const QString &selectedDirectory = {});
     void navigateUp();
@@ -175,8 +197,33 @@ private:
     qint64 m_displayedWorkId = 0; // Zero during a work-switch query transition.
 
     LibraryWorksModel *m_worksModel = nullptr;
+    LibraryWorksFilterModel *m_worksFilter = nullptr;
     LibraryTrackTreeModel *m_tracksModel = nullptr;
     QListView *m_worksView = nullptr;
+    QListView *m_categoriesView = nullptr;
+    QStandardItemModel *m_categoriesModel = nullptr;
+    QToolButton *m_allWorksButton = nullptr;
+    QToolButton *m_categoriesButton = nullptr;
+    QToolButton *m_categoryBackButton = nullptr;
+    QToolButton *m_createCategoryButton = nullptr;
+    QLabel *m_categoryNameLabel = nullptr;
+    QWidget *m_categoryNavigation = nullptr;
+    QVector<WorkCategory> m_categories;
+    QVector<WorkCategoryMembership> m_categoryMemberships;
+    bool m_categoryMode = false;
+    qint64 m_currentCategoryId = 0;
+    qint64 m_lastCategoryId = 0;
+    bool m_categoryMutationBusy = false;
+    QHash<qint64, int> m_sidebarScrollPositions;
+    QHash<qint64, quint64> m_categoryCoverRevisions;
+    quint64 m_categoryCoverSequence = 0;
+    QVector<WorkCategoryCoverDemand> m_lastCategoryCoverDemand;
+    QMenu *m_categoryContextMenu = nullptr;
+    QAction *m_renameCategoryAction = nullptr;
+    QAction *m_removeCategoryAction = nullptr;
+    qint64 m_categoryMenuId = 0;
+    quint64 m_categorySnapshotRevision = 0;
+    quint64 m_categoryMenuSnapshotRevision = 0;
     CoverArtWidget *m_workCover = nullptr;
     QWidget *m_workInformation = nullptr;
     QTimer *m_coverDemandTimer = nullptr;
@@ -212,9 +259,13 @@ private:
     QVector<qint64> m_batchMenuIds;
     QVector<qint64> m_translationMenuIds;
     QMenu *m_workContextMenu = nullptr;
+    QAction *m_editWorkAction = nullptr;
     QAction *m_openWorkFolderAction = nullptr;
     QAction *m_removeWorkAction = nullptr;
     QAction *m_workReferencesAction = nullptr;
+    QMenu *m_addWorkToCategoryMenu = nullptr;
+    QAction *m_removeCurrentCategoryAction = nullptr;
+    qint64 m_workMenuCategoryId = 0;
     struct WorkMenuContext {
         quint64 revision = 0;
         LibraryWork work;

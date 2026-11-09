@@ -24,6 +24,13 @@ QVector<BusinessTableSchema> businessTableSchemas(int version)
         tables.append({QStringLiteral("work_reference_scans"), QStringLiteral("CREATE TABLE work_reference_scans (work_id INTEGER PRIMARY KEY REFERENCES works(id) ON DELETE CASCADE, root_key TEXT NOT NULL, imported_at_ms INTEGER NOT NULL CHECK(imported_at_ms >= 0), synchronized_at TEXT NOT NULL)")});
         tables.append({QStringLiteral("work_references"), QStringLiteral("CREATE TABLE work_references (id INTEGER PRIMARY KEY AUTOINCREMENT, work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE, relative_path TEXT NOT NULL, path_key TEXT NOT NULL, format TEXT NOT NULL, source TEXT NOT NULL CHECK(source IN ('file','external-subtitle','generated-asr')), audio_relative_path TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '', source_hash TEXT NOT NULL DEFAULT '', encoding TEXT NOT NULL DEFAULT '', encoding_inferred INTEGER NOT NULL CHECK(encoding_inferred IN (0,1)), extractor_version TEXT NOT NULL DEFAULT '', content_version TEXT NOT NULL DEFAULT '', content_json TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL CHECK(state IN ('ready','no-text','failed','missing')), error TEXT NOT NULL DEFAULT '', warning TEXT NOT NULL DEFAULT '', missing INTEGER NOT NULL CHECK(missing IN (0,1)), UNIQUE(work_id,path_key))")});
     }
+    if (version >= 7) {
+        tables.append({QStringLiteral("categories"), QStringLiteral("CREATE TABLE categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE CHECK(length(name) > 0))")});
+        tables.append({QStringLiteral("work_categories"), QStringLiteral("CREATE TABLE work_categories (category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE, work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE, added_at_ms INTEGER NOT NULL CHECK(typeof(added_at_ms) = 'integer' AND added_at_ms >= 0), PRIMARY KEY(category_id,work_id))")});
+    }
+    if (version >= 8) {
+        tables.append({QStringLiteral("category_artwork"), QStringLiteral("CREATE TABLE category_artwork (category_id INTEGER PRIMARY KEY REFERENCES categories(id) ON DELETE CASCADE, managed_file TEXT NOT NULL CHECK(length(managed_file) > 0))")});
+    }
     return tables;
 }
 BusinessDatabase::BusinessDatabase(QString path)

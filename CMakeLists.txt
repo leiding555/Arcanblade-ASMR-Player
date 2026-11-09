@@ -135,6 +135,8 @@ add_library(AsmrLibrary STATIC
     src/library/BusinessDatabase.h src/library/BusinessDatabase.cpp
     src/library/SubtitleTranslationCleanup.h src/library/SubtitleTranslationCleanup.cpp
     src/library/LibraryRepositoryWorkSettings.cpp
+    src/library/WorkCategoryTypes.h
+    src/library/LibraryRepositoryCategories.cpp
     src/library/LibraryRepository.cpp
     src/library/LibraryRepositorySubtitles.cpp
     src/library/LibraryRepositoryProgress.cpp
@@ -242,6 +244,8 @@ set(_library_subtitle_playback_sources
     ${_cover_widget_sources}
     src/ui/MainWindowArtwork.cpp
     src/ui/MainWindowWorkEditor.cpp
+    src/ui/MainWindowCategories.cpp
+    src/ui/CategoryEditDialog.h src/ui/CategoryEditDialog.cpp
     src/ui/MainWindowWorkReferences.cpp
     src/ui/WorkReferenceDialog.h src/ui/WorkReferenceDialog.cpp
     src/ui/WorkEditDialog.h src/ui/WorkEditDialog.cpp

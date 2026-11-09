@@ -59,6 +59,9 @@ struct LibraryRootRefreshResult {
     QString taskId;
     bool cancelled = false;
     QString errorMessage;
+    // Availability checks for known works outside this run's discovery roots.
+    // The parent directories are only verified, never imported as new roots.
+    LibraryRootRefreshRootResult workVerification;
     QVector<LibraryRootRefreshRootResult> roots;
 };
 class LibraryRootRefreshServiceTestAccess;
@@ -95,9 +98,14 @@ private:
     static Preparation prepare(const QString &databasePath, const QString &root,
         const LibraryRootRefreshOptions &options, const std::shared_ptr<std::atomic<bool>> &cancelled,
         const std::shared_ptr<const std::function<void()>> &beforeDiscovery);
+    static Preparation verifyKnownWorks(const QString &databasePath, const QStringList &roots,
+        const LibraryRootRefreshOptions &options, const std::shared_ptr<std::atomic<bool>> &cancelled,
+        const std::shared_ptr<const std::function<void()>> &beforeVerification);
     void scheduleNext();
     void advance(const QString &id);
+    void beginWorkVerification();
     void beginRoot();
+    LibraryRootRefreshItemResult &currentItem();
     void consumeChild(const LibraryImportTaskResult &child);
     void finishRoot();
     void finishRefresh();
@@ -117,8 +125,11 @@ private:
     QFuture<Preparation> m_discoveryLifetime;
     std::shared_ptr<std::atomic<bool>> m_cancelDiscovery;
     std::shared_ptr<const std::function<void()>> m_beforeDiscovery;
+    std::shared_ptr<const std::function<void()>> m_beforeWorkVerification;
     std::optional<LibraryImportTaskResult> m_deferredChildResult;
     bool m_rootPrepared = false;
+    bool m_workVerificationPrepared = false;
+    bool m_verifyingWorks = true;
     bool m_discovering = false;
     bool m_active = false;
     bool m_finalizing = false;

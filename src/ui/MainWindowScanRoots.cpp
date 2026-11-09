@@ -337,11 +337,8 @@ void MainWindow::startRootRefresh(const QStringList &roots)
         m_libraryPanel->setImportError(QStringLiteral("已有扫描或导入任务，请等待完成或停止当前任务。"));
         return;
     }
-    if (roots.isEmpty()) {
-        m_libraryPanel->setImportError(QStringLiteral("尚未添加扫描根目录，请先打开扫描目录管理。"));
-        return;
-    }
-    // Only explicit managed roots can enter this background refresh path.
+    // Known works are verified even without discovery roots. Only registered
+    // roots may discover/import additional works during this refresh.
     const auto managed = m_scanRootStore->roots();
     QStringList requested;
     for (const auto &root : roots) {
@@ -359,7 +356,7 @@ void MainWindow::startRootRefresh(const QStringList &roots)
     m_libraryPanel->setImportFeedback({});
     const auto accepted = m_libraryRootRefreshService->start(requested);
     if (accepted.status != LibraryImportSubmissionStatus::Accepted) {
-        m_libraryPanel->setImportError(QStringLiteral("当前无法开始扫描根刷新。"));
+        m_libraryPanel->setImportError(QStringLiteral("当前无法开始作品库刷新。"));
         return;
     }
     for (const auto &root : requested) {
@@ -506,6 +503,19 @@ void MainWindow::applyRootRefreshFinished(const LibraryRootRefreshResult &result
         else ++suppressed;
     };
     qsizetype added = 0, updated = 0, removed = 0, skipped = 0, failed = 0, overlaps = 0, associationFailed = 0;
+    const auto &verification = result.workVerification;
+    removed += verification.removed;
+    failed += verification.failed + (verification.errorMessage.isEmpty() ? 0 : 1);
+    if (!verification.errorMessage.isEmpty())
+        detail(QStringLiteral("在库作品核验：%1").arg(verification.errorMessage));
+    for (const auto &message : verification.diagnostics) detail(message);
+    for (const auto &item : verification.items) {
+        if (!item.errorMessage.isEmpty())
+            detail(item.directory + QStringLiteral("：") + item.errorMessage);
+        for (const auto &message : item.diagnostics) detail(message);
+    }
+    if (verification.notStarted > 0)
+        detail(QStringLiteral("在库作品核验尚有 %1 项未开始，记录保留。").arg(verification.notStarted));
     for (const auto &root : result.roots) {
         added += root.imported;
         updated += root.updated;
@@ -552,7 +562,7 @@ void MainWindow::applyRootRefreshFinished(const LibraryRootRefreshResult &result
     if (!result.errorMessage.isEmpty())
         details.prepend(result.errorMessage);
     const auto summary = QStringLiteral("%1 新增 %2，更新 %3，已清理作品 %4，跳过 %5，失败 %6，重叠待确认 %7，字幕关联异常 %8（已提交的作品更新保留）。")
-        .arg(result.cancelled ? QStringLiteral("扫描已停止。") : QStringLiteral("扫描完成。"))
+        .arg(result.cancelled ? QStringLiteral("刷新已停止。") : QStringLiteral("刷新完成。"))
         .arg(added).arg(updated).arg(removed).arg(skipped).arg(failed).arg(overlaps).arg(associationFailed);
     if (suppressed)
         details.append(QStringLiteral("另有 %1 条诊断未显示。").arg(suppressed));

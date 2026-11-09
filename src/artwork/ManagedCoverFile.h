@@ -41,6 +41,15 @@ public:
     // Call only after committing the title and manual-selection changes.
     [[nodiscard]] static bool cleanup(const ManualCoverSettings &settings,
         const ManualCoverIdentity &identity, const QString &keepToken = {});
+    // Categories own a separate namespace, scoped by database path and category ID.
+    [[nodiscard]] static ManagedCoverStageResult stageCategory(const ManualCoverSettings &settings,
+        qint64 categoryId, const ManagedCoverDraft &draft);
+    [[nodiscard]] static QString categoryPath(const ManualCoverSettings &settings,
+        qint64 categoryId, const QString &token);
+    [[nodiscard]] static bool discardCategory(const ManualCoverSettings &settings,
+        qint64 categoryId, const QString &token);
+    [[nodiscard]] static bool cleanupCategory(const ManualCoverSettings &settings,
+        qint64 categoryId, const QString &keepToken = {});
 };
 
 } // namespace asmr

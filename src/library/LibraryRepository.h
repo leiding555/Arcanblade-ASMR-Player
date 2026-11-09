@@ -2,6 +2,7 @@
 
 #include "library/DirectoryScanner.h"
 #include "library/SqliteWriteTransaction.h"
+#include "library/WorkCategoryTypes.h"
 
 #include <QSqlDatabase>
 #include <QSet>
@@ -34,6 +35,8 @@ enum class LibraryDiagnosticCode {
     InvalidPlaybackProgress,
     StalePlaybackProgress,
     InvalidWorkTitle,
+    InvalidCategory,
+    StaleCategory,
 };
 
 struct LibraryDiagnostic {
@@ -70,6 +73,16 @@ struct LibraryOperationResult {
 
 struct LibraryWorksResult : LibraryOperationResult {
     QVector<LibraryWork> works;
+};
+
+struct LibraryCategorySnapshotResult : LibraryOperationResult {
+    QVector<LibraryWork> works;
+    QVector<WorkCategory> categories;
+    QVector<WorkCategoryMembership> memberships;
+};
+
+struct LibraryCategoryWriteResult : LibraryOperationResult {
+    WorkCategory category;
 };
 
 struct LibraryFilesResult : LibraryOperationResult {
@@ -207,6 +220,16 @@ public:
     LibraryOperationResult close();
     bool isOpen() const;
     LibraryWorksResult works();
+    LibraryCategorySnapshotResult categorySnapshot();
+    LibraryCategoryWriteResult createCategory(const QString &name,
+        const std::optional<LibraryWork> &addWork = std::nullopt);
+    LibraryOperationResult renameCategory(const WorkCategory &expected, const QString &name);
+    // nullopt preserves the previous private cover, empty restores automatic selection.
+    LibraryOperationResult updateCategory(const WorkCategory &expected, const QString &name,
+        const std::optional<QString> &managedCoverFile = std::nullopt);
+    LibraryOperationResult removeCategory(const WorkCategory &expected);
+    LibraryOperationResult setWorkCategory(const LibraryWork &expectedWork,
+        const WorkCategory &expectedCategory, bool present);
     LibraryFilesResult files(qint64 workId);
     LibraryWorkSnapshotResult workSnapshot(qint64 workId);
     LibraryWorkBrowseResult workBrowseSnapshot(qint64 workId);

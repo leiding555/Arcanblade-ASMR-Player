@@ -28,6 +28,8 @@
 #include <QPolygonF>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QSortFilterProxyModel>
+#include <QStandardItemModel>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableView>
@@ -71,7 +73,7 @@ QLabel *plainLabel(const QString &name, QWidget *parent)
     return label;
 }
 
-enum class LibraryIcon { Folder, Audio, Add, Ai, Settings, Refresh, Edit };
+enum class LibraryIcon { Folder, Audio, Add, Ai, Settings, Refresh, Edit, Back };
 
 class SidebarButton final : public QPushButton {
 public:
@@ -180,6 +182,9 @@ QIcon lineIcon(LibraryIcon kind, const QColor &color = QColor(QStringLiteral("#B
         painter.drawLine(QPointF(10, 14), QPointF(21, 3));
         break;
     }
+    case LibraryIcon::Back:
+        painter.drawPolyline(QPolygonF{QPointF(15, 5), QPointF(8, 12), QPointF(15, 19)});
+        break;
     }
     painter.end();
     return QIcon(pixmap);
@@ -267,6 +272,28 @@ protected:
     }
 private:
     int m_maximumLines = 2;
+};
+
+class SidebarCategoryTitle final : public QLabel
+{
+public:
+    explicit SidebarCategoryTitle(QWidget *parent) : QLabel(parent)
+    {
+        setTextFormat(Qt::PlainText);
+        setMinimumWidth(0);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    }
+    QSize sizeHint() const override { return {80, fontMetrics().height()}; }
+    QSize minimumSizeHint() const override { return {0, fontMetrics().height()}; }
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setPen(palette().color(foregroundRole()));
+        painter.setFont(font());
+        painter.drawText(contentsRect(), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+            fontMetrics().elidedText(text(), Qt::ElideRight, contentsRect().width()));
+    }
 };
 
 // Keep decoration in the view: the library model retains its existing data and
@@ -644,6 +671,37 @@ private:
     QIcon m_placeholder;
 };
 
+// Keep the authoritative work catalog intact while the sidebar browses a category.
+class LibraryWorksFilterModel final : public QSortFilterProxyModel
+{
+public:
+    explicit LibraryWorksFilterModel(QObject *parent) : QSortFilterProxyModel(parent) {}
+    void setMembers(bool filtered, const QVector<qint64> &ids)
+    {
+        QHash<qint64, int> order;
+        for (int i = 0; i < ids.size(); ++i) order.insert(ids.at(i), i);
+        if (m_filtered == filtered && m_order == order) return;
+        m_filtered = filtered;
+        m_order = std::move(order);
+        invalidateFilter();
+        sort(filtered ? 0 : -1);
+    }
+protected:
+    bool filterAcceptsRow(int row, const QModelIndex &parent) const override
+    {
+        return !m_filtered || m_order.contains(sourceModel()->index(row, 0, parent)
+            .data(LibraryPanel::WorkIdRole).toLongLong());
+    }
+    bool lessThan(const QModelIndex &left, const QModelIndex &right) const override
+    {
+        return m_order.value(left.data(LibraryPanel::WorkIdRole).toLongLong())
+            < m_order.value(right.data(LibraryPanel::WorkIdRole).toLongLong());
+    }
+private:
+    bool m_filtered = false;
+    QHash<qint64, int> m_order;
+};
+
 LibraryPanel::LibraryPanel(QWidget *parent)
     : QWidget(parent)
 {
@@ -664,9 +722,18 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     brand->setWordWrap(false);
     brand->setMinimumWidth(0);
     brand->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    auto *worksTitle = plainLabel(QStringLiteral("libraryWorksTitle"), sidebar);
-    worksTitle->setText(QStringLiteral("本地作品"));
-    worksTitle->setProperty("subtleLabel", true);
+    m_allWorksButton = new QToolButton(sidebar);
+    m_allWorksButton->setObjectName(QStringLiteral("libraryWorksTitle"));
+    m_allWorksButton->setText(QStringLiteral("本地作品"));
+    m_categoriesButton = new QToolButton(sidebar);
+    m_categoriesButton->setObjectName(QStringLiteral("libraryCategoriesButton"));
+    m_categoriesButton->setText(QStringLiteral("分类"));
+    for (auto *button : {m_allWorksButton, m_categoriesButton}) {
+        button->setCheckable(true);
+        button->setAutoRaise(true);
+        button->setStyleSheet(QStringLiteral("QToolButton { padding: 4px 0; border: none; color: #ADB5C1; background: transparent; } QToolButton:checked { color: #7FC5B4; } QToolButton:hover { color: #F2FFF8; }"));
+    }
+    m_allWorksButton->setChecked(true);
     m_workCountLabel = plainLabel(QStringLiteral("libraryWorkCountLabel"), sidebar);
     m_workCountLabel->setProperty("subtleLabel", true);
     m_importMenuButton = new SidebarButton(QStringLiteral("导入作品"), sidebar);
@@ -709,18 +776,20 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     m_refreshScanRootsButton->setIconSize(QSize(20, 20));
     m_refreshScanRootsButton->setObjectName(QStringLiteral("libraryRefreshScanRootsButton"));
     m_refreshScanRootsButton->setMinimumWidth(0);
-    m_refreshScanRootsButton->setAccessibleName(QStringLiteral("刷新全部扫描根目录"));
+    m_refreshScanRootsButton->setAccessibleName(QStringLiteral("刷新作品库"));
     m_refreshScanRootsButton->setFixedWidth(34);
     m_refreshScanRootsButton->setProperty("sidebarRefresh", true);
-    m_refreshScanRootsButton->setToolTip(QStringLiteral("后台刷新所有已保存的扫描根目录，发现新增作品并清理已删除作品的库记录。"));
+    m_refreshScanRootsButton->setToolTip(QStringLiteral("后台核验所有在库作品，清理确认已删除的作品记录；同时刷新已保存的扫描根目录，发现新增作品。"));
     m_cancelButton = new QPushButton(QStringLiteral("取消扫描"), sidebar);
     m_cancelButton->setObjectName(QStringLiteral("libraryCancelButton"));
 
     m_worksModel = new LibraryWorksModel(this);
+    m_worksFilter = new LibraryWorksFilterModel(this);
+    m_worksFilter->setSourceModel(m_worksModel);
     m_worksView = new QListView(sidebar);
     m_worksView->setObjectName(QStringLiteral("libraryWorksView"));
     m_worksView->setAccessibleName(QStringLiteral("本地作品列表"));
-    m_worksView->setModel(m_worksModel);
+    m_worksView->setModel(m_worksFilter);
     m_worksView->setItemDelegate(new LibraryItemDelegate(true, m_worksView));
     m_worksView->setFrameShape(QFrame::NoFrame);
     m_worksView->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -733,6 +802,16 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     m_worksView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_workContextMenu = new QMenu(m_worksView);
     m_workContextMenu->setObjectName(QStringLiteral("libraryWorkContextMenu"));
+    m_editWorkAction = m_workContextMenu->addAction(QStringLiteral("编辑…"));
+    m_editWorkAction->setObjectName(QStringLiteral("libraryEditWorkAction"));
+    m_editWorkAction->setEnabled(false);
+    connect(m_editWorkAction, &QAction::triggered, this, [this] {
+        const auto context = m_workMenuContext;
+        if (!canRequestWorkRemoval() || context.revision != m_workMenuRevision
+            || context.work.id <= 0 || !m_worksModel->matchesIdentity(context.work)) return;
+        invalidateWorkContextMenu();
+        emit editWorkRequested(context.work.id);
+    });
     m_openWorkFolderAction = m_workContextMenu->addAction(QStringLiteral("打开作品文件夹"));
     m_openWorkFolderAction->setObjectName(QStringLiteral("libraryOpenWorkFolderAction"));
     m_openWorkFolderAction->setEnabled(false);
@@ -752,6 +831,21 @@ LibraryPanel::LibraryPanel(QWidget *parent)
             || context.work.id <= 0 || !m_worksModel->matchesIdentity(context.work)) return;
         invalidateWorkContextMenu();
         emit workReferencesRequested(context.work.id);
+    });
+    m_addWorkToCategoryMenu = m_workContextMenu->addMenu(QStringLiteral("添加到分类"));
+    m_addWorkToCategoryMenu->setObjectName(QStringLiteral("libraryAddWorkToCategoryMenu"));
+    m_addWorkToCategoryMenu->menuAction()->setEnabled(false);
+    m_removeCurrentCategoryAction = m_workContextMenu->addAction(QStringLiteral("从当前分类移除"));
+    m_removeCurrentCategoryAction->setObjectName(QStringLiteral("libraryRemoveCurrentCategoryAction"));
+    m_removeCurrentCategoryAction->setVisible(false);
+    connect(m_removeCurrentCategoryAction, &QAction::triggered, this, [this] {
+        const auto context = m_workMenuContext;
+        const qint64 categoryId = m_workMenuCategoryId;
+        if (!canMutateCategories() || context.revision != m_workMenuRevision
+            || !m_worksModel->matchesIdentity(context.work) || categoryId <= 0
+            || !categoryWorkIds(categoryId).contains(context.work.id)) return;
+        invalidateWorkContextMenu();
+        emit workCategoryRequested(context.work.id, categoryId, false);
     });
     m_workContextMenu->addSeparator();
     m_removeWorkAction = m_workContextMenu->addAction(QStringLiteral("删除作品…"));
@@ -781,6 +875,85 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     m_worksStack = new QStackedWidget(sidebar);
     m_worksStack->addWidget(m_worksEmptyLabel);
     m_worksStack->addWidget(m_worksView);
+    m_categoriesModel = new QStandardItemModel(this);
+    m_categoriesView = new QListView(sidebar);
+    m_categoriesView->setObjectName(QStringLiteral("libraryCategoriesView"));
+    m_categoriesView->setAccessibleName(QStringLiteral("作品分类列表"));
+    m_categoriesView->setModel(m_categoriesModel);
+    m_categoriesView->setItemDelegate(new LibraryItemDelegate(true, m_categoriesView));
+    m_categoriesView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_categoriesView->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_categoriesView->setFrameShape(QFrame::NoFrame);
+    m_categoriesView->setSpacing(3);
+    m_categoriesView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_categoriesView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    m_worksStack->addWidget(m_categoriesView);
+    m_categoryNavigation = new QWidget(sidebar);
+    m_categoryNavigation->setObjectName(QStringLiteral("librarySidebarSecondaryRow"));
+    m_categoryNavigation->setFixedHeight(32);
+    auto *categoryNavigationLayout = new QHBoxLayout(m_categoryNavigation);
+    categoryNavigationLayout->setContentsMargins(0, 0, 0, 0);
+    categoryNavigationLayout->setSpacing(6);
+    m_categoryBackButton = new QToolButton(m_categoryNavigation);
+    m_categoryBackButton->setObjectName(QStringLiteral("libraryCategoryBackButton"));
+    m_categoryBackButton->setIcon(lineIcon(LibraryIcon::Back));
+    m_categoryBackButton->setIconSize(QSize(20, 20));
+    m_categoryBackButton->setFixedSize(32, 32);
+    m_categoryBackButton->setStyleSheet(QStringLiteral("QToolButton { padding: 0; border: none; background: transparent; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; } QToolButton:hover { background: #2C363B; border-radius: 6px; }"));
+    m_categoryBackButton->setAccessibleName(QStringLiteral("返回分类列表"));
+    m_categoryBackButton->setToolTip(QStringLiteral("返回分类列表"));
+    m_categoryBackButton->setAutoRaise(true);
+    m_categoryNameLabel = new SidebarCategoryTitle(m_categoryNavigation);
+    m_categoryNameLabel->setObjectName(QStringLiteral("libraryCategoryNameLabel"));
+    m_categoryNameLabel->setProperty("subtleLabel", true);
+    m_createCategoryButton = new QToolButton(m_categoryNavigation);
+    m_createCategoryButton->setObjectName(QStringLiteral("libraryCreateCategoryButton"));
+    m_createCategoryButton->setText(QStringLiteral("＋ 新建"));
+    m_createCategoryButton->setAccessibleName(QStringLiteral("新建分类"));
+    m_createCategoryButton->setToolTip(QStringLiteral("新建分类"));
+    m_createCategoryButton->setStyleSheet(QStringLiteral("QToolButton { padding: 2px 4px; min-height: 0; border: none; background: transparent; } QToolButton:hover { background: #2C363B; border-radius: 6px; }"));
+    m_createCategoryButton->setAutoRaise(true);
+    categoryNavigationLayout->addWidget(m_categoryBackButton);
+    categoryNavigationLayout->addWidget(m_categoryNameLabel, 1);
+    m_workCountLabel->setWordWrap(false);
+    m_workCountLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    categoryNavigationLayout->addWidget(m_workCountLabel);
+    categoryNavigationLayout->addWidget(m_createCategoryButton);
+    m_categoryContextMenu = new QMenu(m_categoriesView);
+    m_categoryContextMenu->setObjectName(QStringLiteral("libraryCategoryContextMenu"));
+    m_renameCategoryAction = m_categoryContextMenu->addAction(QStringLiteral("编辑分类…"));
+    m_renameCategoryAction->setObjectName(QStringLiteral("libraryRenameCategoryAction"));
+    m_removeCategoryAction = m_categoryContextMenu->addAction(QStringLiteral("删除分类…"));
+    m_removeCategoryAction->setObjectName(QStringLiteral("libraryRemoveCategoryAction"));
+    connect(m_renameCategoryAction, &QAction::triggered, this, [this] {
+        const qint64 id = m_categoryMenuId;
+        if (!canMutateCategories() || id <= 0 || m_categoryMenuSnapshotRevision != m_categorySnapshotRevision) return;
+        invalidateCategoryContextMenu();
+        emit renameCategoryRequested(id);
+    });
+    connect(m_removeCategoryAction, &QAction::triggered, this, [this] {
+        const qint64 id = m_categoryMenuId;
+        if (!canMutateCategories() || id <= 0 || m_categoryMenuSnapshotRevision != m_categorySnapshotRevision) return;
+        invalidateCategoryContextMenu();
+        emit removeCategoryRequested(id);
+    });
+    connect(m_allWorksButton, &QToolButton::clicked, this, [this] { setSidebarLocation(false); });
+    connect(m_categoriesButton, &QToolButton::clicked, this, [this] {
+        setSidebarLocation(true, m_categoryMode ? m_currentCategoryId : m_lastCategoryId);
+    });
+    connect(m_categoryBackButton, &QToolButton::clicked, this, [this] { setSidebarLocation(true); });
+    connect(m_createCategoryButton, &QToolButton::clicked, this, [this] {
+        if (canMutateCategories()) emit createCategoryRequested(0);
+    });
+    const auto openCategory = [this](const QModelIndex &index) {
+        const qint64 id = index.data(CategoryIdRole).toLongLong();
+        if (!m_closing && id > 0) setSidebarLocation(true, id);
+    };
+    connect(m_categoriesView, &QListView::doubleClicked, this, openCategory);
+    connect(m_categoriesView->verticalScrollBar(), &QScrollBar::valueChanged, this,
+        [this] { scheduleWorkCoverDemand(); });
+    connect(m_categoriesView->verticalScrollBar(), &QScrollBar::rangeChanged, this,
+        [this] { scheduleWorkCoverDemand(); });
 
     m_statusText = QStringLiteral("尚未导入作品目录");
     m_queryLabel = plainLabel(QStringLiteral("libraryQueryStateLabel"), sidebar);
@@ -798,10 +971,12 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     sidebarLayout->addWidget(brand);
     sidebarLayout->addWidget(m_importMenuButton);
     auto *worksHeading = new QHBoxLayout;
-    worksHeading->addWidget(worksTitle, 1);
+    worksHeading->addWidget(m_allWorksButton);
+    worksHeading->addWidget(m_categoriesButton);
+    worksHeading->addStretch(1);
     worksHeading->addWidget(m_refreshScanRootsButton);
     sidebarLayout->addLayout(worksHeading);
-    sidebarLayout->addWidget(m_workCountLabel);
+    sidebarLayout->addWidget(m_categoryNavigation);
     sidebarLayout->addWidget(m_worksStack, 1);
     sidebarLayout->addWidget(m_queryLabel);
     sidebarLayout->addWidget(m_errorLabel);
@@ -1194,6 +1369,8 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     // events during construction from observing a partially built workspace.
     m_worksView->installEventFilter(this);
     m_worksView->viewport()->installEventFilter(this);
+    m_categoriesView->installEventFilter(this);
+    m_categoriesView->viewport()->installEventFilter(this);
     tracksPane->installEventFilter(this);
     m_breadcrumbBar->installEventFilter(this);
     m_breadcrumbRootButton->installEventFilter(this);
@@ -1208,6 +1385,42 @@ LibraryPanel::LibraryPanel(QWidget *parent)
 
 bool LibraryPanel::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_categoriesView->viewport()
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Show
+            || event->type() == QEvent::Hide)) scheduleWorkCoverDemand();
+    if (watched == m_categoriesView->viewport()
+        && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease
+            || event->type() == QEvent::MouseButtonDblClick)
+        && static_cast<QMouseEvent *>(event)->button() == Qt::RightButton) return true;
+    if ((watched == m_categoriesView || watched == m_categoriesView->viewport())
+        && event->type() == QEvent::ContextMenu) {
+        const auto *context = static_cast<QContextMenuEvent *>(event);
+        const bool keyboard = context->reason() == QContextMenuEvent::Keyboard;
+        const auto index = keyboard ? m_categoriesView->currentIndex()
+            : m_categoriesView->indexAt(m_categoriesView->viewport()->mapFromGlobal(context->globalPos()));
+        showCategoryContextMenu(index, keyboard ? m_categoriesView->viewport()->mapToGlobal(
+            m_categoriesView->visualRect(index).center()) : context->globalPos());
+        return true;
+    }
+    if (watched == m_categoriesView && event->type() == QEvent::KeyPress) {
+        const auto *key = static_cast<QKeyEvent *>(event);
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+            && (key->modifiers() == Qt::NoModifier || key->modifiers() == Qt::KeypadModifier)) {
+            const qint64 id = m_categoriesView->currentIndex().data(CategoryIdRole).toLongLong();
+            if (!key->isAutoRepeat() && !m_closing && m_categoriesView->isVisible() && id > 0)
+                setSidebarLocation(true, id);
+            return true;
+        }
+        if ((key->key() == Qt::Key_Menu && key->modifiers() == Qt::NoModifier)
+            || (key->key() == Qt::Key_F10 && key->modifiers() == Qt::ShiftModifier)) {
+            if (!key->isAutoRepeat()) {
+                const auto index = m_categoriesView->currentIndex();
+                showCategoryContextMenu(index, m_categoriesView->viewport()->mapToGlobal(
+                    m_categoriesView->visualRect(index).center()));
+            }
+            return true;
+        }
+    }
     if ((watched == m_welcomePage
             && (event->type() == QEvent::Resize || event->type() == QEvent::Show
                 || event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange))
@@ -1495,23 +1708,213 @@ void LibraryPanel::invalidateWorkContextMenu()
 {
     ++m_workMenuRevision;
     m_workMenuContext = {};
+    m_editWorkAction->setEnabled(false);
     m_openWorkFolderAction->setEnabled(false);
     m_removeWorkAction->setEnabled(false);
     m_workContextMenu->close();
     m_workReferencesAction->setEnabled(false);
+    m_workMenuCategoryId = 0;
+    m_addWorkToCategoryMenu->menuAction()->setEnabled(false);
+    m_removeCurrentCategoryAction->setEnabled(false);
+    invalidateCategoryContextMenu();
 }
 
 void LibraryPanel::showWorkContextMenu(const QModelIndex &index, const QPoint &globalPosition)
 {
     invalidateWorkContextMenu();
-    const auto work = m_worksModel->workAt(index);
+    const auto work = m_worksModel->workAt(m_worksFilter->mapToSource(index));
     if (m_closing || !work || work->id <= 0 || !m_worksView->isEnabled())
         return;
     m_workMenuContext = {m_workMenuRevision, *work};
+    m_editWorkAction->setEnabled(canRequestWorkRemoval());
     m_openWorkFolderAction->setEnabled(canRequestWorkRemoval());
     m_removeWorkAction->setEnabled(canRequestWorkRemoval());
     m_workReferencesAction->setEnabled(canRequestWorkRemoval());
+    m_workMenuCategoryId = m_currentCategoryId;
+    m_addWorkToCategoryMenu->clear();
+    m_addWorkToCategoryMenu->menuAction()->setEnabled(canMutateCategories());
+    for (const auto &category : m_categories) {
+        auto *action = m_addWorkToCategoryMenu->addAction(
+            QString(category.name).replace(QLatin1Char('&'), QStringLiteral("&&")));
+        action->setObjectName(QStringLiteral("libraryWorkCategoryAction_%1").arg(category.id));
+        action->setCheckable(true);
+        action->setChecked(categoryWorkIds(category.id).contains(work->id));
+        const auto revision = m_categorySnapshotRevision;
+        const qint64 categoryId = category.id;
+        connect(action, &QAction::triggered, this, [this, categoryId, revision](bool present) {
+            const auto context = m_workMenuContext;
+            if (!canMutateCategories() || revision != m_categorySnapshotRevision
+                || context.revision != m_workMenuRevision || !m_worksModel->matchesIdentity(context.work)) return;
+            invalidateWorkContextMenu();
+            emit workCategoryRequested(context.work.id, categoryId, present);
+        });
+    }
+    if (!m_categories.isEmpty()) m_addWorkToCategoryMenu->addSeparator();
+    auto *create = m_addWorkToCategoryMenu->addAction(QStringLiteral("新建分类…"));
+    create->setObjectName(QStringLiteral("libraryCreateWorkCategoryAction"));
+    connect(create, &QAction::triggered, this, [this] {
+        const auto context = m_workMenuContext;
+        if (!canMutateCategories() || context.revision != m_workMenuRevision
+            || !m_worksModel->matchesIdentity(context.work)) return;
+        invalidateWorkContextMenu();
+        emit createCategoryRequested(context.work.id);
+    });
+    m_removeCurrentCategoryAction->setVisible(m_categoryMode && m_currentCategoryId > 0);
+    m_removeCurrentCategoryAction->setEnabled(canMutateCategories()
+        && categoryWorkIds(m_currentCategoryId).contains(work->id));
     m_workContextMenu->popup(globalPosition);
+}
+
+bool LibraryPanel::canMutateCategories() const
+{
+    return canRequestWorkRemoval() && !m_categoryMutationBusy;
+}
+
+void LibraryPanel::invalidateCategoryContextMenu()
+{
+    m_categoryMenuId = 0;
+    if (!m_categoryContextMenu) return;
+    m_renameCategoryAction->setEnabled(false);
+    m_removeCategoryAction->setEnabled(false);
+    m_categoryContextMenu->close();
+}
+
+void LibraryPanel::showCategoryContextMenu(const QModelIndex &index, const QPoint &globalPosition)
+{
+    invalidateCategoryContextMenu();
+    const qint64 id = index.data(CategoryIdRole).toLongLong();
+    if (m_closing || !index.isValid() || index.model() != m_categoriesModel || id <= 0) return;
+    m_categoryMenuId = id;
+    m_categoryMenuSnapshotRevision = m_categorySnapshotRevision;
+    m_renameCategoryAction->setEnabled(canMutateCategories());
+    m_removeCategoryAction->setEnabled(canMutateCategories());
+    m_categoryContextMenu->popup(globalPosition);
+}
+
+QVector<qint64> LibraryPanel::categoryWorkIds(qint64 categoryId) const
+{
+    QVector<WorkCategoryMembership> members;
+    for (const auto &entry : m_categoryMemberships)
+        if (entry.categoryId == categoryId && m_worksModel->rowForId(entry.workId) >= 0)
+            members.append(entry);
+    std::sort(members.begin(), members.end(), [](const auto &left, const auto &right) {
+        return left.addedAtMs != right.addedAtMs ? left.addedAtMs > right.addedAtMs : left.workId > right.workId;
+    });
+    QVector<qint64> ids;
+    QSet<qint64> seen;
+    for (const auto &entry : members) {
+        if (!seen.contains(entry.workId)) { seen.insert(entry.workId); ids.append(entry.workId); }
+    }
+    return ids;
+}
+
+void LibraryPanel::updateCategoryFilter()
+{
+    const QSignalBlocker blocker(m_worksView->selectionModel());
+    m_worksFilter->setMembers(m_categoryMode && m_currentCategoryId > 0, categoryWorkIds(m_currentCategoryId));
+    restoreVisibleWorkSelection();
+}
+
+void LibraryPanel::setSidebarLocation(bool categories, qint64 categoryId)
+{
+    if (m_closing) return;
+    if (categoryId > 0 && std::none_of(m_categories.cbegin(), m_categories.cend(),
+        [categoryId](const auto &category) { return category.id == categoryId; })) return;
+    invalidateWorkContextMenu();
+    const qint64 oldKey = !m_categoryMode ? 0 : m_currentCategoryId > 0 ? m_currentCategoryId : -1;
+    auto *oldView = m_categoryMode && m_currentCategoryId == 0 ? m_categoriesView : m_worksView;
+    m_sidebarScrollPositions.insert(oldKey, oldView->verticalScrollBar()->value());
+    const bool enteringCategories = categories && categoryId == 0
+        && (!m_categoryMode || m_currentCategoryId != 0);
+    m_categoryMode = categories;
+    m_currentCategoryId = categories ? categoryId : 0;
+    if (categories) m_lastCategoryId = categoryId;
+    updateCategoryFilter();
+    if (enteringCategories) {
+        for (const auto &category : m_categories)
+            m_categoryCoverRevisions.insert(category.id, ++m_categoryCoverSequence);
+        for (int row = 0; row < m_categoriesModel->rowCount(); ++row)
+            m_categoriesModel->item(row)->setIcon(workCoverIcon());
+    }
+    updatePresentation();
+    auto *view = m_categoryMode && m_currentCategoryId == 0 ? m_categoriesView : m_worksView;
+    view->doItemsLayout();
+    const qint64 key = !m_categoryMode ? 0 : m_currentCategoryId > 0 ? m_currentCategoryId : -1;
+    view->verticalScrollBar()->setValue(m_sidebarScrollPositions.value(key));
+    scheduleWorkCoverDemand();
+}
+
+void LibraryPanel::rebuildCategoryRows()
+{
+    const int scroll = m_categoriesView->verticalScrollBar()->value();
+    const qint64 selectedId = m_categoriesView->currentIndex().data(CategoryIdRole).toLongLong();
+    const QSignalBlocker blocker(m_categoriesView->selectionModel());
+    m_categoriesModel->clear();
+    for (const auto &category : m_categories) {
+        const auto count = categoryWorkIds(category.id).size();
+        auto *item = new QStandardItem(workCoverIcon(), QStringLiteral("%1\n%2 部作品").arg(category.name).arg(count));
+        item->setData(category.id, CategoryIdRole);
+        item->setData(QSize(0, 62), Qt::SizeHintRole);
+        item->setToolTip(safeToolTip(category.name));
+        item->setEditable(false);
+        m_categoriesModel->appendRow(item);
+        if (category.id == selectedId) m_categoriesView->setCurrentIndex(item->index());
+    }
+    m_categoriesView->doItemsLayout();
+    m_categoriesView->verticalScrollBar()->setValue(scroll);
+}
+
+void LibraryPanel::setCategories(const QVector<WorkCategory> &categories,
+                                 const QVector<WorkCategoryMembership> &memberships)
+{
+    const bool wasCategoryList = m_categoryMode && m_currentCategoryId == 0;
+    const int workScroll = m_worksView->verticalScrollBar()->value();
+    invalidateWorkContextMenu();
+    ++m_categorySnapshotRevision;
+    m_categories = categories;
+    m_categoryMemberships = memberships;
+    m_categoryCoverRevisions.clear();
+    for (const auto &category : m_categories)
+        m_categoryCoverRevisions.insert(category.id, ++m_categoryCoverSequence);
+    if (m_currentCategoryId > 0 && std::none_of(m_categories.cbegin(), m_categories.cend(),
+        [this](const auto &category) { return category.id == m_currentCategoryId; })) m_currentCategoryId = 0;
+    if (m_lastCategoryId > 0 && std::none_of(m_categories.cbegin(), m_categories.cend(),
+        [this](const auto &category) { return category.id == m_lastCategoryId; })) m_lastCategoryId = 0;
+    rebuildCategoryRows();
+    updateCategoryFilter();
+    updatePresentation();
+    m_worksView->doItemsLayout();
+    if (m_categoryMode && m_currentCategoryId == 0 && !wasCategoryList) {
+        m_categoriesView->doItemsLayout();
+        m_categoriesView->verticalScrollBar()->setValue(m_sidebarScrollPositions.value(-1));
+    } else if (!wasCategoryList) {
+        m_worksView->verticalScrollBar()->setValue(workScroll);
+    }
+    scheduleWorkCoverDemand();
+}
+
+void LibraryPanel::setCategoryMutationBusy(bool busy)
+{
+    if (m_categoryMutationBusy == busy) return;
+    m_categoryMutationBusy = busy;
+    invalidateWorkContextMenu();
+    updatePresentation();
+}
+
+void LibraryPanel::setCategoryCover(qint64 categoryId, quint64 revision, const CoverArtResult &result)
+{
+    if (m_closing || !m_categoriesView->isVisible()
+        || m_categoryCoverRevisions.value(categoryId) != revision
+        || std::none_of(m_lastCategoryCoverDemand.cbegin(), m_lastCategoryCoverDemand.cend(),
+            [categoryId, revision](const auto &entry) { return entry.categoryId == categoryId && entry.revision == revision; })) return;
+    for (int row = 0; row < m_categoriesModel->rowCount(); ++row) {
+        auto *item = m_categoriesModel->item(row);
+        if (item->data(CategoryIdRole).toLongLong() == categoryId) {
+            item->setIcon(result.status == CoverArtStatus::Ready && !result.image.isNull()
+                ? workCoverIcon(result.image) : workCoverIcon());
+            return;
+        }
+    }
 }
 
 bool LibraryPanel::hasAvailableDirectoryAudio() const
@@ -1875,6 +2278,7 @@ void LibraryPanel::setLibrary(const QVector<LibraryWork> &works,
                               const QVector<LibraryFile> &files, qint64 selectedWorkId,
                               const QSet<qint64> &subtitleAudioFileIds)
 {
+    const int sidebarScroll = m_worksView->verticalScrollBar()->value();
     invalidateWorkContextMenu();
     rememberBrowseState();
     ++m_browseRevision;
@@ -1893,12 +2297,14 @@ void LibraryPanel::setLibrary(const QVector<LibraryWork> &works,
     }
     const QSignalBlocker blocker(m_worksView->selectionModel());
     m_worksModel->setWorks(works);
+    m_worksFilter->setMembers(m_categoryMode && m_currentCategoryId > 0, categoryWorkIds(m_currentCategoryId));
     const int selectedRow = m_worksModel->rowForId(selectedWorkId);
     m_selectedWorkId = selectedRow < 0 ? 0 : selectedWorkId;
     restoreVisibleWorkSelection();
     const bool reset = m_tracksModel->setFiles(m_selectedWorkId, files);
     m_tracksModel->setSubtitleTracks(m_selectedWorkId, subtitleAudioFileIds);
     m_displayedWorkId = m_selectedWorkId;
+    rebuildCategoryRows();
     // Deleted works lose their cached pages; surviving works keep navigation and selection.
     for (auto it = m_browseStates.begin(); it != m_browseStates.end();) {
         if (m_worksModel->rowForId(it.key()) < 0)
@@ -1916,6 +2322,8 @@ void LibraryPanel::setLibrary(const QVector<LibraryWork> &works,
     rebuildBreadcrumbs();
     m_libraryErrorText.clear();
     updatePresentation();
+    m_worksView->doItemsLayout();
+    m_worksView->verticalScrollBar()->setValue(sidebarScroll);
     scheduleWorkCoverDemand();
     scheduleTrackDurationDemand(true);
 }
@@ -1975,7 +2383,7 @@ void LibraryPanel::restoreVisibleWorkSelection()
 {
     const int sourceRow = m_worksModel->rowForId(m_selectedWorkId);
     const auto visible = sourceRow < 0 ? QModelIndex()
-        : m_worksModel->index(sourceRow);
+        : m_worksFilter->mapFromSource(m_worksModel->index(sourceRow));
     if (visible.isValid()) {
         m_worksView->selectionModel()->setCurrentIndex(visible,
             QItemSelectionModel::ClearAndSelect);
@@ -2082,8 +2490,8 @@ void LibraryPanel::setWorkCover(qint64 workId, const CoverArtResult &result)
 {
     if (m_closing || workId <= 0 || m_worksModel->rowForId(workId) < 0)
         return;
-    const auto index = m_worksModel->index(m_worksModel->rowForId(workId));
-    const bool visible = m_worksView->isVisible()
+    const auto index = m_worksFilter->mapFromSource(m_worksModel->index(m_worksModel->rowForId(workId)));
+    const bool visible = index.isValid() && m_worksView->isVisible()
         && m_worksView->visualRect(index).intersects(m_worksView->viewport()->rect());
     if (workId != m_selectedWorkId && !visible)
         return;
@@ -2188,7 +2596,7 @@ void LibraryPanel::scheduleWorkCoverDemand(bool force)
 void LibraryPanel::publishWorkCoverDemand()
 {
     QVector<qint64> visible;
-    if (!m_closing && m_worksView->isVisible() && m_worksModel->rowCount() > 0) {
+    if (!m_closing && m_worksView->isVisible() && m_worksFilter->rowCount() > 0) {
         const QRect viewport = m_worksView->viewport()->rect();
         QModelIndex first;
         // The first pixels may be spacing above the first row. Locate one row,
@@ -2196,8 +2604,8 @@ void LibraryPanel::publishWorkCoverDemand()
         for (int y = 0; y < viewport.height() && !first.isValid(); y += 4)
             first = m_worksView->indexAt(QPoint(viewport.width() / 2, y));
         if (first.isValid()) {
-            for (int row = first.row(); row < m_worksModel->rowCount(); ++row) {
-                const auto index = m_worksModel->index(row);
+            for (int row = first.row(); row < m_worksFilter->rowCount(); ++row) {
+                const auto index = m_worksFilter->index(row, 0);
                 const QRect bounds = m_worksView->visualRect(index);
                 if (bounds.top() >= viewport.height()) break;
                 if (bounds.intersects(viewport)) visible.append(index.data(WorkIdRole).toLongLong());
@@ -2210,10 +2618,51 @@ void LibraryPanel::publishWorkCoverDemand()
     m_worksModel->retainCovers(wanted);
     const bool changed = selected != m_lastCoverDemandSelected || visible != m_lastCoverDemandVisible;
     const bool force = std::exchange(m_forceCoverDemand, false);
+    publishCategoryCoverDemand(force);
     if (!changed && !force) return;
     m_lastCoverDemandSelected = selected;
     m_lastCoverDemandVisible = visible;
     emit workCoverDemandChanged(selected, visible);
+}
+
+void LibraryPanel::publishCategoryCoverDemand(bool force)
+{
+    QVector<WorkCategoryCoverDemand> demand;
+    if (!m_closing && m_categoriesView->isVisible()) {
+        const QRect viewport = m_categoriesView->viewport()->rect();
+        for (int row = 0; row < m_categoriesModel->rowCount(); ++row) {
+            const auto index = m_categoriesModel->index(row, 0);
+            const QRect bounds = m_categoriesView->visualRect(index);
+            if (bounds.top() >= viewport.height()) break;
+            if (!bounds.intersects(viewport)) continue;
+            const qint64 id = index.data(CategoryIdRole).toLongLong();
+            if (force) {
+                m_categoryCoverRevisions.insert(id, ++m_categoryCoverSequence);
+                m_categoriesModel->item(row)->setIcon(workCoverIcon());
+            }
+            const auto category = std::find_if(m_categories.cbegin(), m_categories.cend(),
+                [id](const auto &entry) { return entry.id == id; });
+            demand.append({id, m_categoryCoverRevisions.value(id), categoryWorkIds(id),
+                category == m_categories.cend() ? QString() : category->managedCoverFile});
+        }
+    }
+    // Only visible category thumbnails are retained, just like work rows.
+    for (const auto &previous : m_lastCategoryCoverDemand) {
+        if (std::any_of(demand.cbegin(), demand.cend(), [&previous](const auto &entry) {
+            return entry.categoryId == previous.categoryId;
+        })) continue;
+        m_categoryCoverRevisions.insert(previous.categoryId, ++m_categoryCoverSequence);
+        for (int row = 0; row < m_categoriesModel->rowCount(); ++row) {
+            auto *item = m_categoriesModel->item(row);
+            if (item->data(CategoryIdRole).toLongLong() == previous.categoryId) {
+                item->setIcon(workCoverIcon());
+                break;
+            }
+        }
+    }
+    if (!force && demand == m_lastCategoryCoverDemand) return;
+    m_lastCategoryCoverDemand = demand;
+    emit categoryCoverDemandChanged(demand);
 }
 
 void LibraryPanel::updateWorkHeaderGeometry()
@@ -2362,6 +2811,23 @@ void LibraryPanel::updatePresentation()
                 ? QStringLiteral("取消参考资料准备；已提交的作品音频和字幕保留。")
             : QStringLiteral("请求协作取消扫描，收到最终结果后才确认已取消。"));
     m_worksView->setEnabled(!m_closing);
+    m_categoriesView->setEnabled(!m_closing);
+    m_allWorksButton->setEnabled(!m_closing);
+    m_categoriesButton->setEnabled(!m_closing);
+    m_allWorksButton->setChecked(!m_categoryMode);
+    m_categoriesButton->setChecked(m_categoryMode);
+    const bool categoryMembers = m_categoryMode && m_currentCategoryId > 0;
+    m_categoryNavigation->setVisible(true);
+    m_categoryBackButton->setVisible(categoryMembers);
+    m_categoryBackButton->setEnabled(!m_closing);
+    m_createCategoryButton->setVisible(m_categoryMode && m_currentCategoryId == 0);
+    m_createCategoryButton->setEnabled(canMutateCategories());
+    const auto currentCategory = std::find_if(m_categories.cbegin(), m_categories.cend(),
+        [this](const auto &entry) { return entry.id == m_currentCategoryId; });
+    m_categoryNameLabel->setText(currentCategory == m_categories.cend() ? QString() : currentCategory->name);
+    m_categoryNameLabel->setVisible(categoryMembers);
+    m_categoryNameLabel->setToolTip(currentCategory == m_categories.cend() ? QString() : safeToolTip(currentCategory->name));
+    qobject_cast<QHBoxLayout *>(m_categoryNavigation->layout())->setStretch(2, categoryMembers ? 0 : 1);
     m_tracksView->setEnabled(!m_closing);
     const bool canQueue = canRequestQueuePlayback();
     updateTranslationActions();
@@ -2388,8 +2854,13 @@ void LibraryPanel::updatePresentation()
     m_errorLabel->setVisible(!m_errorLabel->text().isEmpty());
     const int workCount = m_worksModel->rowCount();
     const qsizetype trackCount = m_tracksModel->trackCount();
-    m_workCountLabel->setText(QStringLiteral("%1 部作品").arg(workCount));
-    m_workCountLabel->setToolTip(QStringLiteral("共 %1 部作品。").arg(workCount));
+    const bool categoryList = m_categoryMode && m_currentCategoryId == 0;
+    const int visibleWorkCount = m_worksFilter->rowCount();
+    m_workCountLabel->setText(categoryList ? QStringLiteral("%1 个分类").arg(m_categories.size())
+        : QStringLiteral("%1 部作品").arg(visibleWorkCount));
+    m_workCountLabel->setToolTip(m_workCountLabel->text());
+    m_workCountLabel->setMinimumWidth(categoryMembers
+        ? m_workCountLabel->fontMetrics().horizontalAdvance(m_workCountLabel->text()) : 0);
     const bool welcome = workCount == 0 && !m_querying;
     m_welcomeContent->setVisible(welcome);
     m_welcomeIconLabel->setVisible(welcome);
@@ -2400,11 +2871,14 @@ void LibraryPanel::updatePresentation()
     m_tracksEmptyLabel->setVisible(!welcome);
     m_welcomeImportButton->setVisible(welcome);
     m_welcomeAddScanRootButton->setVisible(welcome);
-    m_worksStack->setCurrentIndex(workCount == 0 ? 0 : 1);
+    m_worksStack->setCurrentIndex(categoryList ? (m_categories.isEmpty() ? 0 : 2)
+        : visibleWorkCount == 0 ? 0 : 1);
     m_tracksStack->setCurrentIndex(trackCount == 0 ? 0 : 1);
     scheduleWorkCoverDemand();
     scheduleTrackDurationDemand();
-    m_worksEmptyLabel->setText(QStringLiteral("本地作品会显示在这里"));
+    m_worksEmptyLabel->setText(categoryList ? QStringLiteral("暂无分类，点击“＋ 新建”创建。")
+        : m_categoryMode ? QStringLiteral("分类暂无作品，可在作品右键菜单中添加。")
+        : QStringLiteral("本地作品会显示在这里"));
     if (m_querying) {
         m_tracksEmptyLabel->setText(m_selectedWorkId > 0
             ? QStringLiteral("正在读取音轨…") : QStringLiteral("正在读取作品库…"));
@@ -2419,7 +2893,7 @@ void LibraryPanel::updatePresentation()
     auto *sidebar = m_importMenuButton->parentWidget();
     const bool compact = sidebar->property("compactLibrarySidebar").toBool();
     sidebar->findChild<QLabel *>(QStringLiteral("applicationTitle"))->setVisible(m_applicationTitleVisible);
-    m_workCountLabel->setVisible(!compact);
+    m_workCountLabel->setVisible(true);
     const QString cancelName = m_workRemovalActive ? QStringLiteral("取消删除")
         : m_batchImportMode ? QStringLiteral("停止批次") : QStringLiteral("取消扫描");
     m_cancelButton->setAccessibleName(cancelName);

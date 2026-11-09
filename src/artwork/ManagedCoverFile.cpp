@@ -52,13 +52,10 @@ bool safeExistingPath(const QString &path, bool directory)
     }
     return true;
 }
-QString workDirectory(const ManualCoverSettings &settings, const ManualCoverIdentity &identity,
-    bool create)
+QString databaseDirectory(const ManualCoverSettings &settings, bool create)
 {
     const QString database = normalizedIdentity(settings.databasePath);
-    const QString root = normalizedIdentity(identity.rootPath);
-    if (database.isEmpty() || root.isEmpty() || identity.workId <= 0 || identity.importedAtMs < 0)
-        return {};
+    if (database.isEmpty()) return {};
     QString base = settings.managedDirectory;
     if (base.isEmpty()) base = QDir(QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation)).filePath(QStringLiteral("Covers"));
@@ -76,10 +73,30 @@ QString workDirectory(const ManualCoverSettings &settings, const ManualCoverIden
     if (!QFileInfo::exists(base) && (!create || !QDir().mkpath(base))) return {};
     if (!safeExistingPath(base, true)) return {};
     const QString databaseDir = QDir(base).filePath(hash(database.toUtf8()));
+    if (!QFileInfo::exists(databaseDir) && (!create || !QDir().mkdir(databaseDir))) return {};
+    return safeExistingPath(databaseDir, true) ? databaseDir : QString{};
+}
+QString workDirectory(const ManualCoverSettings &settings, const ManualCoverIdentity &identity,
+    bool create)
+{
+    const QString root = normalizedIdentity(identity.rootPath);
+    if (root.isEmpty() || identity.workId <= 0 || identity.importedAtMs < 0) return {};
+    const QString databaseDir = databaseDirectory(settings, create);
+    if (databaseDir.isEmpty()) return {};
     const QByteArray key = QByteArray::number(identity.workId) + '\0'
         + QByteArray::number(identity.importedAtMs) + '\0' + root.toUtf8();
     const QString target = QDir(databaseDir).filePath(hash(key));
-    for (const QString &part : {databaseDir, target}) {
+    if (!QFileInfo::exists(target) && (!create || !QDir().mkdir(target))) return {};
+    return safeExistingPath(target, true) ? target : QString{};
+}
+QString categoryDirectory(const ManualCoverSettings &settings, qint64 categoryId, bool create)
+{
+    if (categoryId <= 0) return {};
+    const QString databaseDir = databaseDirectory(settings, create);
+    if (databaseDir.isEmpty()) return {};
+    const QString namespaceDir = QDir(databaseDir).filePath(QStringLiteral("categories"));
+    const QString target = QDir(namespaceDir).filePath(QString::number(categoryId));
+    for (const QString &part : {namespaceDir, target}) {
         if (!QFileInfo::exists(part) && (!create || !QDir().mkdir(part))) return {};
         if (!safeExistingPath(part, true)) return {};
     }
@@ -210,6 +227,67 @@ bool ManagedCoverFile::cleanup(const ManualCoverSettings &settings,
     for (const auto &entry : folder.entryInfoList(QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden)) {
         const QString token = entry.fileName();
         if (token != keepToken && validToken(token) && !discard(settings, identity, token)) success = false;
+    }
+    return success;
+}
+
+ManagedCoverStageResult ManagedCoverFile::stageCategory(const ManualCoverSettings &settings,
+    qint64 categoryId, const ManagedCoverDraft &draft)
+{
+    if (!draft.success) return {false, {}, QStringLiteral("没有可保存的分类封面图片。")};
+    const auto verified = decode(draft.bytes);
+    if (!verified.success || verified.extension != draft.extension)
+        return {false, {}, QStringLiteral("分类封面图片快照无效。")};
+    const QString directory = categoryDirectory(settings, categoryId, true);
+    if (directory.isEmpty()) return {false, {}, QStringLiteral("无法创建分类封面副本目录。")};
+    const QString token = QUuid::createUuid().toString(QUuid::WithoutBraces)
+        + u'.' + verified.extension;
+    const QString target = QDir(directory).filePath(token);
+    if (QFileInfo::exists(target)) return {false, {}, QStringLiteral("分类封面副本文件已存在，请重试。")};
+    QSaveFile file(target);
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly) || file.write(draft.bytes) != draft.bytes.size()
+        || !safeExistingPath(directory, true) || !file.commit())
+        return {false, {}, QStringLiteral("保存分类封面副本失败，原封面保持不变。")};
+    if (categoryPath(settings, categoryId, token).isEmpty()) {
+        static_cast<void>(discardCategory(settings, categoryId, token));
+        return {false, {}, QStringLiteral("无法确认分类封面副本的安全位置。")};
+    }
+    return {true, token, {}};
+}
+
+QString ManagedCoverFile::categoryPath(const ManualCoverSettings &settings,
+    qint64 categoryId, const QString &token)
+{
+    if (!validToken(token)) return {};
+    const QString directory = categoryDirectory(settings, categoryId, false);
+    if (directory.isEmpty()) return {};
+    const QString target = QDir(directory).filePath(token);
+    return safeExistingPath(target, false) ? target : QString{};
+}
+
+bool ManagedCoverFile::discardCategory(const ManualCoverSettings &settings,
+    qint64 categoryId, const QString &token)
+{
+    if (!validToken(token)) return false;
+    const QString directory = categoryDirectory(settings, categoryId, false);
+    if (directory.isEmpty()) return false;
+    const QString target = QDir(directory).filePath(token);
+    if (!QFileInfo::exists(target)) return true;
+    return safeExistingPath(target, false) && QFile::remove(target);
+}
+
+bool ManagedCoverFile::cleanupCategory(const ManualCoverSettings &settings,
+    qint64 categoryId, const QString &keepToken)
+{
+    if (categoryId <= 0 || (!keepToken.isEmpty() && !validToken(keepToken))) return false;
+    const QString directory = categoryDirectory(settings, categoryId, false);
+    if (directory.isEmpty()) return true;
+    bool success = true;
+    const QDir folder(directory);
+    for (const auto &entry : folder.entryInfoList(QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden)) {
+        const QString token = entry.fileName();
+        if (token != keepToken && validToken(token) && !discardCategory(settings, categoryId, token)) success = false;
     }
     return success;
 }

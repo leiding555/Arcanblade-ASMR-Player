@@ -44,6 +44,10 @@ void MainWindow::connectCoverArt()
             if (!m_closing && coverIdentity(workId).workId > 0)
                 m_libraryPanel->setWorkCover(workId, result);
         });
+    connect(m_libraryPanel, &LibraryPanel::categoryCoverDemandChanged,
+            m_workCoverService, &WorkCoverService::setCategoryDemand);
+    connect(m_workCoverService, &WorkCoverService::categoryResultReady,
+            m_libraryPanel, &LibraryPanel::setCategoryCover);
     connect(m_workCoverService, &WorkCoverService::shutdownFinished, this, [this] {
         m_workCoverShutdownFinished = true;
         finishCloseIfReady();

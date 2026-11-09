@@ -28,6 +28,7 @@
 #include "playback/TrackDurationService.h"
 #include "ui/CoverSelectionDialog.h"
 #include "ui/WorkEditDialog.h"
+#include "ui/CategoryEditDialog.h"
 #include "ui/WorkReferenceDialog.h"
 #include "ui/BoundSubtitleDialog.h"
 #include "ui/ChickenRiceTranslateDialog.h"
@@ -38,6 +39,7 @@
 #include <QDesktopServices>
 #include <QCloseEvent>
 #include <QDir>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFutureWatcher>
@@ -290,6 +292,8 @@ void MainWindow::restartForUpdate(const UpdateDownloadResult &result)
 // The unique_ptr still destroys the window with MainWindow, including while visible.
 MainWindow::~MainWindow()
 {
+    if (m_categoryMutationCancelled) m_categoryMutationCancelled->store(true);
+    if (m_categoryMutationInProgress) m_categoryMutationLifetime.waitForFinished();
     if (m_updateInstallCancelled) m_updateInstallCancelled->store(true);
     if (m_updateNotifications) m_updateNotifications->shutdown();
     if (m_workFolderCancelled) m_workFolderCancelled->store(true);
@@ -559,6 +563,8 @@ namespace {
 struct LibraryQuerySnapshot {
     bool success = false;
     QVector<LibraryWork> works;
+    QVector<WorkCategory> categories;
+    QVector<WorkCategoryMembership> memberships;
     QVector<LibraryFile> files;
     QSet<qint64> subtitleAudioFileIds;
     qint64 selectedWorkId = 0;
@@ -688,12 +694,14 @@ LibraryQuerySnapshot queryLibrary(const QString &path, qint64 preferredWorkId)
                              .arg(libraryDiagnostics(opened.diagnostics));
         return snapshot;
     }
-    const auto works = repository.works();
+    const auto works = repository.categorySnapshot();
     if (!works.success) {
         snapshot.error = libraryDiagnostics(works.diagnostics);
         return snapshot;
     }
     snapshot.works = works.works;
+    snapshot.categories = works.categories;
+    snapshot.memberships = works.memberships;
     for (const auto &work : snapshot.works) {
         if (work.id == preferredWorkId) {
             snapshot.selectedWorkId = work.id;
@@ -758,6 +766,7 @@ void MainWindow::connectLibrary()
     connectBatchImport();
     connectScanRoots();
     connectWorkReferences();
+    connectWorkCategories();
 }
 
 void MainWindow::openLibraryDirectory()
@@ -1132,11 +1141,14 @@ void MainWindow::startLibraryQuery()
             m_libraryPanel->setImportAvailable(snapshot.success);
             if (snapshot.success) {
                 m_libraryWorksSnapshot = snapshot.works;
+                m_categoriesSnapshot = snapshot.categories;
+                m_categoryMembershipsSnapshot = snapshot.memberships;
                 m_libraryFilesSnapshot = snapshot.files;
                 m_librarySnapshotWorkId = snapshot.selectedWorkId;
                 syncWorkCoverCatalog();
                 m_libraryPanel->setLibrary(snapshot.works, snapshot.files, snapshot.selectedWorkId,
                                            snapshot.subtitleAudioFileIds);
+                m_libraryPanel->setCategories(snapshot.categories, snapshot.memberships);
                 updateCoverActions();
                 QSet<qint64> missingFileIds;
                 for (const auto &file : snapshot.files)
@@ -1273,7 +1285,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (m_closing && !m_updateInstallPreparing
         && (!m_updateNotifications || m_updateNotifications->isShutdownFinished())
         && m_libraryShutdownFinished && m_batchShutdownFinished && m_rootShutdownFinished
-        && !m_libraryQueryInProgress && !m_subtitleBadgeQueryInProgress && m_workFolderWorkers == 0
+        && !m_libraryQueryInProgress && !m_categoryMutationInProgress && !m_subtitleBadgeQueryInProgress && m_workFolderWorkers == 0
         && !m_audioOpenInProgress && !m_queuePreparationInProgress
         && !m_subtitleQueryInProgress && !m_subtitleLoadInProgress
         && !m_subtitleChoiceQueryInProgress && !m_preferenceWriteInProgress
@@ -1282,6 +1294,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         && !m_coverMutationInProgress && m_coverMutations.isEmpty() && !m_coverErrorDialog
         && (!m_coverSelectionDialog || m_coverSelectionDialog->isIdle())
         && (!m_workEditDialog || m_workEditDialog->isIdle())
+        && (!m_categoryNameDialog || m_categoryNameDialog->isIdle())
         && (!m_workReferenceDialog || m_workReferenceDialog->isIdle())
         && (!m_chickenRiceTranslateDialog || !m_chickenRiceTranslateDialog->isBusy())
         && acknowledgePlaybackProgressCloseFailure()) {
@@ -1293,6 +1306,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
         return;
     finishPlaybackProgressForClose();
     m_closing = true;
+    if (m_categoryMutationCancelled) m_categoryMutationCancelled->store(true);
+    if (m_categoryNameDialog) {
+        m_categoryNameDialog->hide();
+        m_categoryNameDialog->shutdown();
+    }
+    if (m_categoryRemovalConfirmation) m_categoryRemovalConfirmation->reject();
     if (m_updateInstallCancelled) m_updateInstallCancelled->store(true);
     if (m_updateNotifications) m_updateNotifications->shutdown();
     ++m_workFolderGeneration;
@@ -1375,7 +1394,7 @@ void MainWindow::finishCloseIfReady()
     if (!m_closing || m_updateInstallPreparing
         || (m_updateNotifications && !m_updateNotifications->isShutdownFinished())
         || !m_libraryShutdownFinished || !m_batchShutdownFinished || !m_rootShutdownFinished || m_libraryQueryInProgress
-        || m_subtitleBadgeQueryInProgress || m_workFolderWorkers > 0
+        || m_categoryMutationInProgress || m_subtitleBadgeQueryInProgress || m_workFolderWorkers > 0
         || m_audioOpenInProgress || m_queuePreparationInProgress || m_subtitleQueryInProgress
         || m_subtitleLoadInProgress || m_subtitleChoiceQueryInProgress
         || m_preferenceWriteInProgress || !m_preferenceRequests.isEmpty()
@@ -1387,6 +1406,7 @@ void MainWindow::finishCloseIfReady()
     if (m_scanRootSettingsInProgress || m_coverMutationInProgress || !m_coverMutations.isEmpty() || m_coverErrorDialog
         || (m_coverSelectionDialog && !m_coverSelectionDialog->isIdle())
         || (m_workEditDialog && !m_workEditDialog->isIdle())
+        || (m_categoryNameDialog && !m_categoryNameDialog->isIdle())
         || (m_workReferenceDialog && !m_workReferenceDialog->isIdle()))
         return;
     if (!acknowledgePlaybackProgressCloseFailure())

@@ -80,8 +80,10 @@ LibraryRootRefreshService::Preparation LibraryRootRefreshService::prepare(
     try {
         if (beforeDiscovery) (*beforeDiscovery)();
         if (cancelled->load()) { result.cancelled = true; return prepared; }
-        if (options.maximumItemDiagnostics < 0) {
-            result.errorMessage = QStringLiteral("每项诊断限额不能为负数。");
+        if (options.maximumItemDiagnostics < 0 || options.discovery.maximumEntries <= 0
+            || options.discovery.maximumDiagnostics <= 0 || options.scan.maximumDepth < 0
+            || options.scan.maximumEntries <= 0 || options.scan.maximumDiagnostics <= 0) {
+            result.errorMessage = QStringLiteral("刷新参数无效：深度和诊断限额必须非负，枚举、扫描及诊断上限必须有效。");
             return prepared;
         }
         LibraryRepository repository(databasePath);
@@ -134,6 +136,84 @@ LibraryRootRefreshService::Preparation LibraryRootRefreshService::prepare(
     return prepared;
 }
 
+LibraryRootRefreshService::Preparation LibraryRootRefreshService::verifyKnownWorks(
+    const QString &databasePath, const QStringList &roots, const LibraryRootRefreshOptions &options,
+    const std::shared_ptr<std::atomic<bool>> &cancelled,
+    const std::shared_ptr<const std::function<void()>> &beforeVerification)
+{
+    Preparation prepared;
+    auto &result = prepared.discovery;
+    const auto diagnostic = [&](const QString &message) {
+        diagnose(result.diagnostics, result.suppressedDiagnostics, options.maximumItemDiagnostics, message);
+    };
+    try {
+        if (beforeVerification) (*beforeVerification)();
+        if (cancelled->load()) { result.cancelled = true; return prepared; }
+        if (options.maximumItemDiagnostics < 0 || options.discovery.maximumEntries <= 0
+            || options.discovery.maximumDiagnostics <= 0 || options.scan.maximumDepth < 0
+            || options.scan.maximumEntries <= 0 || options.scan.maximumDiagnostics <= 0) {
+            result.errorMessage = QStringLiteral("刷新参数无效：深度和诊断限额必须非负，枚举、扫描及诊断上限必须有效。");
+            return prepared;
+        }
+        LibraryRepository repository(databasePath);
+        const auto opened = repository.open();
+        LibraryWorksResult known;
+        if (opened.success) known = repository.works();
+        const auto closed = repository.close();
+        if (!opened.success || !known.success || !closed.success) {
+            result.errorMessage = QStringLiteral("读取已有作品失败，作品目录核验未执行。");
+            for (const auto &operation : {opened, closed})
+                for (const auto &entry : operation.diagnostics) diagnostic(entry.message);
+            for (const auto &entry : known.diagnostics) diagnostic(entry.message);
+            return prepared;
+        }
+        QSet<QString> discoveredParents;
+        for (const auto &root : roots) discoveredParents.insert(ScanRootStore::pathKey(root));
+        for (const auto &work : known.works) {
+            if (cancelled->load()) {
+                result.cancelled = true; prepared.missingWorks.clear(); return prepared;
+            }
+            const QString path = ScanRootStore::normalizePath(work.rootPath);
+            if (work.id <= 0 || path.isEmpty()) {
+                diagnostic(QStringLiteral("作品路径无效，保留作品记录：%1").arg(work.rootPath));
+                continue;
+            }
+            const QString parent = QFileInfo(path).absolutePath();
+            // Those works keep the established full-root discovery/removal
+            // path and per-root statistics; never submit the same work twice.
+            if (discoveredParents.contains(ScanRootStore::pathKey(parent))) continue;
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(nativePath(path), error);
+            const QFileInfo info(path);
+            if (std::filesystem::is_directory(status) && !info.isSymbolicLink() && !info.isJunction()) continue;
+            if (status.type() != std::filesystem::file_type::not_found
+                || (error && error != std::errc::no_such_file_or_directory)) {
+                diagnostic(QStringLiteral("无法确认作品目录已删除，保留作品记录：%1").arg(path));
+                continue;
+            }
+            error.clear();
+            const auto parentStatus = std::filesystem::symlink_status(nativePath(parent), error);
+            const QFileInfo parentInfo(parent);
+            if (error || !std::filesystem::is_directory(parentStatus) || std::filesystem::is_symlink(parentStatus)
+                || parentInfo.isSymbolicLink() || parentInfo.isJunction() || !parentInfo.isReadable()) {
+                diagnostic(QStringLiteral("作品父目录不可访问或包含链接，保留作品记录：%1").arg(path));
+                continue;
+            }
+            // This is only a candidate. The single writer fully enumerates
+            // this parent and rechecks absence while holding its transaction.
+            prepared.missingWorks.append(work);
+        }
+        result.success = true;
+    } catch (const std::exception &exception) {
+        result.success = false; prepared.missingWorks.clear();
+        result.errorMessage = QString::fromUtf8(exception.what());
+    } catch (...) {
+        result.success = false; prepared.missingWorks.clear();
+        result.errorMessage = QStringLiteral("核验作品目录时发生未知错误。");
+    }
+    return prepared;
+}
+
 LibraryRootRefreshService::LibraryRootRefreshService(QString databasePath, LibraryImportService *single, QObject *parent)
     : QObject(parent), m_databasePath(std::move(databasePath)), m_single(single)
 {
@@ -143,9 +223,9 @@ LibraryRootRefreshService::LibraryRootRefreshService(QString databasePath, Libra
         connect(single, &LibraryImportService::taskFinished, this, &LibraryRootRefreshService::consumeChild, Qt::QueuedConnection);
         connect(single, &LibraryImportService::stateChanged, this,
             [this](const QString &id, LibraryImportState state) {
-                if (!m_active || id != m_childTaskId) return;
-                if (state == LibraryImportState::Scanning) publishChildStage(m_result.roots[m_rootIndex].items[m_currentItem].requestedRemoval ? QStringLiteral("正在核实作品目录是否已删除…") : QStringLiteral("正在扫描作品…"));
-                else if (state == LibraryImportState::Committing) publishChildStage(m_result.roots[m_rootIndex].items[m_currentItem].requestedRemoval ? QStringLiteral("正在清理作品及其关联记录…") : QStringLiteral("正在提交作品，等待提交和字幕关联完成…"));
+                if (!m_active || id != m_childTaskId || m_currentItem < 0) return;
+                if (state == LibraryImportState::Scanning) publishChildStage(currentItem().requestedRemoval ? QStringLiteral("正在核实作品目录是否已删除…") : QStringLiteral("正在扫描作品…"));
+                else if (state == LibraryImportState::Committing) publishChildStage(currentItem().requestedRemoval ? QStringLiteral("正在清理作品及其关联记录…") : QStringLiteral("正在提交作品，等待提交和字幕关联完成…"));
                 else if (state == LibraryImportState::ProcessingReferences) publishChildStage(QStringLiteral("作品已入库，正在提取并缓存参考资料…"));
                 else if (state == LibraryImportState::Cancelling) publishChildStage(QStringLiteral("正在停止当前扫描…"));
             }, Qt::QueuedConnection);
@@ -181,6 +261,7 @@ LibraryImportSubmission LibraryRootRefreshService::start(const QStringList &root
     }
     m_options = options; m_rootIndex = 0; m_queue.clear(); m_next = 0; m_currentItem = -1;
     m_childTaskId.clear(); m_deferredChildResult.reset(); m_rootPrepared = false;
+    m_workVerificationPrepared = false; m_verifyingWorks = true;
     m_active = true; m_stopRequested = false;
     m_cancelDiscovery = std::make_shared<std::atomic<bool>>(false);
     const auto id = m_result.taskId;
@@ -196,18 +277,26 @@ void LibraryRootRefreshService::scheduleNext()
 void LibraryRootRefreshService::advance(const QString &id)
 {
     if (!m_active || id != m_result.taskId || m_discovering || m_submitting || !m_childTaskId.isEmpty()) return;
-    if (m_stopRequested || m_shuttingDown || m_rootIndex >= m_result.roots.size()) { finishRefresh(); return; }
+    if (m_stopRequested || m_shuttingDown) { finishRefresh(); return; }
     if (!m_single || m_single->isShuttingDown()) {
         m_result.errorMessage = QStringLiteral("单作品导入服务不可用，刷新已停止。"); finishRefresh(); return;
     }
-    if (!m_rootPrepared) { beginRoot(); return; }
-    if (m_next >= m_queue.size()) { finishRoot(); scheduleNext(); return; }
+    if (!m_workVerificationPrepared) { beginWorkVerification(); return; }
+    if (m_verifyingWorks && m_next >= m_queue.size()) {
+        m_verifyingWorks = false; m_queue.clear(); m_next = 0; m_currentItem = -1;
+    }
+    if (!m_verifyingWorks) {
+        if (m_rootIndex >= m_result.roots.size()) { finishRefresh(); return; }
+        if (!m_rootPrepared) { beginRoot(); return; }
+        if (m_next >= m_queue.size()) { finishRoot(); scheduleNext(); return; }
+    }
     m_currentItem = m_queue[m_next++];
-    auto &item = m_result.roots[m_rootIndex].items[m_currentItem];
+    auto &item = currentItem();
     const auto directory = item.directory;
     QPointer<LibraryRootRefreshService> guard(this);
     m_submitting = true; m_deferredChildResult.reset();
-    const auto submission = item.requestedRemoval ? m_single->submitRemoval(item.workId, directory, m_result.roots[m_rootIndex].rootDirectory)
+    const QString removalParent = m_verifyingWorks ? QFileInfo(directory).absolutePath() : m_result.roots[m_rootIndex].rootDirectory;
+    const auto submission = item.requestedRemoval ? m_single->submitRemoval(item.workId, directory, removalParent)
         : item.workId ? m_single->submitRefresh(item.workId, directory, m_options.scan) : m_single->submit(directory, m_options.scan);
     if (!guard) return;
     m_submitting = false;
@@ -226,6 +315,54 @@ void LibraryRootRefreshService::advance(const QString &id)
     emit childStarted(submission, directory, static_cast<int>(m_next), static_cast<int>(m_queue.size()));
     if (guard && deferred && deferred->taskId == submission.taskId)
         QMetaObject::invokeMethod(this, [this, child = std::move(*deferred)] { consumeChild(child); }, Qt::QueuedConnection);
+}
+LibraryRootRefreshItemResult &LibraryRootRefreshService::currentItem()
+{
+    return m_verifyingWorks ? m_result.workVerification.items[m_currentItem]
+        : m_result.roots[m_rootIndex].items[m_currentItem];
+}
+void LibraryRootRefreshService::beginWorkVerification()
+{
+    const auto id = m_result.taskId;
+    m_discovering = true;
+    auto promise = std::make_shared<QPromise<Preparation>>();
+    auto *watcher = new QFutureWatcher<Preparation>(this);
+    connect(watcher, &QFutureWatcher<Preparation>::finished, this, [this, watcher, id] {
+        const auto prepared = watcher->result(); watcher->deleteLater();
+        if (!m_active || id != m_result.taskId) return;
+        m_discovering = false;
+        auto &verification = m_result.workVerification;
+        const auto &found = prepared.discovery;
+        verification.diagnostics = found.diagnostics; verification.suppressedDiagnostics = found.suppressedDiagnostics;
+        if (m_stopRequested || found.cancelled) {
+            verification.cancelled = true; m_result.cancelled = true; finishRefresh(); return;
+        }
+        verification.success = found.success; verification.errorMessage = found.errorMessage;
+        if (!found.success) {
+            m_result.errorMessage = found.errorMessage;
+            finishRefresh(); return;
+        }
+        m_queue.clear(); m_next = 0; m_currentItem = -1;
+        for (const auto &work : prepared.missingWorks) {
+            LibraryRootRefreshItemResult item; item.directory = work.rootPath;
+            item.workId = work.id; item.requestedRemoval = true;
+            m_queue.append(verification.items.size()); verification.items.append(std::move(item));
+        }
+        m_workVerificationPrepared = true; scheduleNext();
+    });
+    m_discoveryLifetime = promise->future(); watcher->setFuture(m_discoveryLifetime);
+    const auto database = m_databasePath;
+    const auto options = m_options;
+    const auto cancelled = m_cancelDiscovery;
+    const auto beforeVerification = m_beforeWorkVerification;
+    QStringList roots;
+    for (const auto &root : m_result.roots) roots.append(root.rootDirectory);
+    QThreadPool::globalInstance()->start([promise, database, roots, options, cancelled, beforeVerification] {
+        promise->start();
+        promise->addResult(verifyKnownWorks(database, roots, options, cancelled, beforeVerification));
+        promise->finish();
+    });
+    emit stateChanged(QStringLiteral("正在核验全部在库作品目录…"));
 }
 void LibraryRootRefreshService::beginRoot()
 {
@@ -283,7 +420,7 @@ void LibraryRootRefreshService::consumeChild(const LibraryImportTaskResult &chil
 {
     if (m_active && m_submitting && m_childTaskId.isEmpty()) { m_deferredChildResult = child; return; }
     if (!m_active || m_childTaskId.isEmpty() || child.taskId != m_childTaskId) return;
-    summarize(m_result.roots[m_rootIndex].items[m_currentItem], child, m_options.maximumItemDiagnostics);
+    summarize(currentItem(), child, m_options.maximumItemDiagnostics);
     m_childTaskId.clear(); m_currentItem = -1; scheduleNext();
     emit stateChanged(QStringLiteral("当前作品处理完成，正在准备后续项目…"));
 }
@@ -295,7 +432,7 @@ void LibraryRootRefreshService::finishRefresh()
 {
     if (!m_active || m_discovering || m_submitting || !m_childTaskId.isEmpty()) return;
     m_active = false; m_finalizing = true;
-    for (auto &root : m_result.roots) {
+    const auto summarizeRoot = [](LibraryRootRefreshRootResult &root) {
         root.imported = root.updated = root.removed = root.skipped = root.failed = root.associationFailed = root.notStarted = 0;
         for (const auto &item : root.items) {
             switch (item.outcome) {
@@ -311,8 +448,13 @@ void LibraryRootRefreshService::finishRefresh()
             if (item.associationStatus == LibraryAutoAssociationStatus::Failed
                 || item.associationStatus == LibraryAutoAssociationStatus::StaleSnapshot) ++root.associationFailed;
         }
-        if (m_result.cancelled && (&root - m_result.roots.data()) >= m_rootIndex) root.cancelled = true;
         root.success = root.success && !root.cancelled && !root.failed && !root.associationFailed && !root.notStarted;
+    };
+    if (m_result.cancelled && m_verifyingWorks) m_result.workVerification.cancelled = true;
+    summarizeRoot(m_result.workVerification);
+    for (auto &root : m_result.roots) {
+        if (m_result.cancelled && (&root - m_result.roots.data()) >= m_rootIndex) root.cancelled = true;
+        summarizeRoot(root);
     }
     const auto result = m_result;
     QPointer<LibraryRootRefreshService> guard(this);
@@ -357,7 +499,7 @@ void LibraryRootRefreshService::singleDestroyed()
     if (m_cancelDiscovery) m_cancelDiscovery->store(true);
     m_result.errorMessage = QStringLiteral("单作品导入服务已销毁，后续刷新未开始。");
     if (m_currentItem >= 0) {
-        auto &item = m_result.roots[m_rootIndex].items[m_currentItem];
+        auto &item = currentItem();
         item.outcome = LibraryRootRefreshItemOutcome::Failed; item.errorMessage = m_result.errorMessage;
     }
     m_currentItem = -1; m_childTaskId.clear();
@@ -366,6 +508,11 @@ void LibraryRootRefreshService::singleDestroyed()
 void LibraryRootRefreshService::publishChildStage(const QString &text)
 {
     if (!m_active || m_currentItem < 0 || m_childTaskId.isEmpty()) return;
+    if (m_verifyingWorks) {
+        emit stateChanged(QStringLiteral("核验作品 %1/%2：%3\n%4")
+            .arg(m_next).arg(m_queue.size()).arg(QFileInfo(currentItem().directory).fileName(), text));
+        return;
+    }
     emit stateChanged(QStringLiteral("根 %1/%2，作品 %3/%4：%5\n%6")
         .arg(m_rootIndex + 1).arg(m_result.roots.size()).arg(m_next).arg(m_queue.size())
         .arg(QFileInfo(m_result.roots[m_rootIndex].items[m_currentItem].directory).fileName(), text));

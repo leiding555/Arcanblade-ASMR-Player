@@ -35,6 +35,7 @@ class QAction;
 class QLabel;
 class QMessageBox;
 class QFileDialog;
+class QDialog;
 class QSystemTrayIcon;
 
 namespace asmr {
@@ -64,6 +65,7 @@ class WorkCoverService;
 class TrackDurationService;
 class CoverSelectionDialog;
 class WorkEditDialog;
+class CategoryEditDialog;
 class WorkReferenceDialog;
 class UpdateNotificationController;
 struct PlaybackProgressTaskResult;
@@ -391,6 +393,31 @@ private:
     // with the existing first-work fallback used by startup/ordinary refresh.
     void refreshLibrary(qint64 preferredWorkId = 0);
     void startLibraryQuery();
+    void connectWorkCategories();
+    void showCategoryNameEditor(qint64 categoryId = 0, qint64 addWorkId = 0);
+    void requestCategoryRemoval(qint64 categoryId);
+    void requestWorkCategory(qint64 workId, qint64 categoryId, bool present);
+    enum class CategoryMutationKind { Create, Rename, Remove, Membership };
+    struct CategoryMutation {
+        CategoryMutationKind kind = CategoryMutationKind::Create;
+        WorkCategory category;
+        std::optional<LibraryWork> work;
+        QString name;
+        std::optional<ManagedCoverDraft> coverDraft;
+        bool automaticCover = false;
+        bool present = false;
+    };
+    struct CategoryMutationResult { bool success = false; QString error; };
+    bool canEditCategories() const;
+    void startCategoryMutation(const CategoryMutation &request);
+    QVector<WorkCategory> m_categoriesSnapshot;
+    QVector<WorkCategoryMembership> m_categoryMembershipsSnapshot;
+    bool m_categoryMutationInProgress = false;
+    QFuture<CategoryMutationResult> m_categoryMutationLifetime;
+    std::shared_ptr<std::atomic_bool> m_categoryMutationCancelled;
+    std::shared_ptr<const std::function<void()>> m_beforeCategoryMutationTestHook;
+    QPointer<CategoryEditDialog> m_categoryNameDialog;
+    QPointer<QMessageBox> m_categoryRemovalConfirmation;
     void openWorkFolder(qint64 workId);
     quint64 m_workFolderGeneration = 0;
     int m_workFolderWorkers = 0;
