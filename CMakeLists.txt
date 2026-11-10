@@ -55,13 +55,18 @@ add_library(AsmrZipArchive STATIC
 target_include_directories(AsmrZipArchive PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(AsmrZipArchive PUBLIC Qt6::Core)
 
+add_library(AsmrDownloadNetwork STATIC
+    src/network/DownloadProxyResolver.h src/network/DownloadProxyResolver.cpp)
+target_include_directories(AsmrDownloadNetwork PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(AsmrDownloadNetwork PUBLIC Qt6::Network)
+
 add_library(AsmrUpdates STATIC
     src/update/SemanticVersion.h src/update/SemanticVersion.cpp
     src/update/UpdateCheckService.h src/update/UpdateCheckService.cpp
     src/update/UpdateDownloadService.h src/update/UpdateDownloadService.cpp
     src/update/UpdatePackage.h src/update/UpdatePackage.cpp
     src/update/UpdateInstaller.h src/update/UpdateInstaller.cpp)
-target_link_libraries(AsmrUpdates PUBLIC AsmrVersion AsmrZipArchive Qt6::Network)
+target_link_libraries(AsmrUpdates PUBLIC AsmrVersion AsmrZipArchive AsmrDownloadNetwork Qt6::Network)
 if(WIN32)
     target_link_libraries(AsmrUpdates PRIVATE bcrypt user32)
     # This helper runs from the update cache after the player exits. It must
@@ -77,7 +82,7 @@ if(WIN32)
         target_compile_options(ArcanbladeUpdater PRIVATE /W4 /utf-8)
     endif()
 endif()
-foreach(_update_target AsmrVersion AsmrUpdates AsmrZipArchive)
+foreach(_update_target AsmrVersion AsmrUpdates AsmrZipArchive AsmrDownloadNetwork)
     if(MSVC)
         target_compile_options(${_update_target} PRIVATE /W4 /utf-8)
     else()
@@ -186,7 +191,7 @@ add_library(AsmrChickenRice STATIC
     src/ai/ChickenRiceGenerationOptions.h src/ai/ChickenRiceGenerationOptions.cpp
 )
 target_include_directories(AsmrChickenRice PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(AsmrChickenRice PUBLIC AsmrZipArchive AsmrGpu AsmrAiSubtitle AsmrSubtitle Qt6::Core Qt6::Network)
+target_link_libraries(AsmrChickenRice PUBLIC AsmrZipArchive AsmrGpu AsmrAiSubtitle AsmrSubtitle AsmrDownloadNetwork Qt6::Core Qt6::Network)
 if(MSVC)
     target_compile_options(AsmrChickenRice PRIVATE /W4 /utf-8)
 else()
@@ -201,7 +206,7 @@ add_library(AsmrFasterWhisper STATIC
     src/ai/FasterWhisperTranscribeService.h src/ai/FasterWhisperTranscribeService.cpp
 )
 target_include_directories(AsmrFasterWhisper PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(AsmrFasterWhisper PUBLIC AsmrAiSubtitle Qt6::Core Qt6::Network)
+target_link_libraries(AsmrFasterWhisper PUBLIC AsmrAiSubtitle AsmrDownloadNetwork Qt6::Core Qt6::Network)
 if(MSVC)
     target_compile_options(AsmrFasterWhisper PRIVATE /W4 /utf-8)
 else()
@@ -214,6 +219,16 @@ set(_audio_file_validation_sources
     src/playback/AudioFileValidation.cpp
 )
 target_sources(AsmrAiSubtitle PRIVATE ${_audio_file_validation_sources})
+add_library(AsmrPlaybackDiagnostics STATIC
+    src/playback/PlaybackDiagnosticLog.h src/playback/PlaybackDiagnosticLog.cpp
+    src/playback/PcmDiagnosticSummary.h src/playback/PcmDiagnosticSummary.cpp)
+target_include_directories(AsmrPlaybackDiagnostics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(AsmrPlaybackDiagnostics PUBLIC Qt6::Core Qt6::Multimedia)
+if(MSVC)
+    target_compile_options(AsmrPlaybackDiagnostics PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(AsmrPlaybackDiagnostics PRIVATE -Wall -Wextra)
+endif()
 add_library(AsmrDuration STATIC
     src/playback/TrackDurationService.h
     src/playback/TrackDurationService.cpp
@@ -423,6 +438,7 @@ if(WIN32)
 endif()
 
 target_link_libraries(AsmrPlayer PRIVATE
+    AsmrPlaybackDiagnostics
     AsmrUpdateUi
     AsmrTranslationSettingsUi
     AsmrChickenRice

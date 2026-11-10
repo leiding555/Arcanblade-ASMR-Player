@@ -1,4 +1,5 @@
 #include "ai/ChickenRiceInstallService.h"
+#include "network/DownloadProxyResolver.h"
 #include "ai/ChickenRiceArchive.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -536,6 +537,7 @@ Result installPackage(const Request &request, const std::atomic_bool &cancelled,
     if (archive.size() > request.package.size)
         return failure(QStringLiteral("Cached ZIP exceeds the known package size."), cancelled);
     QNetworkAccessManager manager;
+    useAutomaticDownloadProxy(manager, cancelled);
     qint64 base = 0;
     const int attempts = std::clamp(request.maximumAttempts, 1, 5);
     for (const auto &part : request.package.parts) {

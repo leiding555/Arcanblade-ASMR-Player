@@ -763,6 +763,7 @@ void MainWindow::restartCurrentQueueEntry()
     cancelPlaybackRestore(false);
     m_queueAdvanceArmed = true;
     m_queueRestartingCurrent = true;
+    m_audioPlayer->diagnosticBoundary(QStringLiteral("loop_restart"));
     // Keep the accepted source, cover, parsed subtitles and current selection.
     // The natural-end clear remains queued (and its error remains visible).
     // Seeking precedes play so a failed clear cannot restore the old endpoint.

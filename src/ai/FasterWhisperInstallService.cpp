@@ -1,4 +1,5 @@
 #include "ai/FasterWhisperInstallService.h"
+#include "network/DownloadProxyResolver.h"
 #include "ai/FasterWhisperArchive.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -597,6 +598,7 @@ Result installPackage(const Request &request, const std::atomic_bool &cancelled,
         return fail(QStringLiteral("Another preparation is using this destination."));
 
     QNetworkAccessManager manager;
+    useAutomaticDownloadProxy(manager, cancelled);
     if (result.engineDirectory.isEmpty()) {
         const auto &file = request.package.engineArchive;
         const QString id = fingerprint(request.package.version, {file});

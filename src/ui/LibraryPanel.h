@@ -212,7 +212,6 @@ private:
     QVector<WorkCategoryMembership> m_categoryMemberships;
     bool m_categoryMode = false;
     qint64 m_currentCategoryId = 0;
-    qint64 m_lastCategoryId = 0;
     bool m_categoryMutationBusy = false;
     QHash<qint64, int> m_sidebarScrollPositions;
     QHash<qint64, quint64> m_categoryCoverRevisions;

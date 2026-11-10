@@ -57,6 +57,7 @@ class BatchImportPreviewDialog;
 class ScanRootStore;
 class ScanRootManagerDialog;
 class PlaybackProgressCoordinator;
+class PlaybackDiagnosticLog;
 class PlaybackQueuePanel;
 class TitleBarWidget;
 class WindowFrameController;
@@ -82,6 +83,9 @@ public:
     explicit MainWindow(const QString &libraryDatabasePath, QWidget *parent = nullptr);
     ~MainWindow() override;
     void startAutomaticUpdateCheck();
+    // Optional application-owned diagnostics; install before opening media.
+    // Explicit database constructors remain isolated from production logs.
+    void setPlaybackDiagnosticLog(PlaybackDiagnosticLog *log);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -100,10 +104,14 @@ private:
     friend class MainWindowAutoSubtitleTests;
     friend class MainWindowSubtitlePreferenceTests;
     friend class MainWindowPlaybackProgressTests;
+    friend class MainWindowPlaybackDiagnosticsTests;
     friend class MainWindowQueueTests;
     friend class MainWindowTitleBarTests;
     friend class MainWindowArtworkTests;
     friend class MainWindowUpdateTests;
+
+    QPointer<PlaybackDiagnosticLog> m_playbackDiagnosticLog;
+    bool m_diagnosticShutdownFinished = true;
 
     [[nodiscard]] QString updateRestartBlockedReason() const;
     void restartForUpdate(const UpdateDownloadResult &result);

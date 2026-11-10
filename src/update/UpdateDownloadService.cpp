@@ -1,4 +1,5 @@
 #include "update/UpdateDownloadService.h"
+#include "network/DownloadProxyResolver.h"
 
 #include "update/ApplicationVersion.h"
 #include "update/UpdatePackage.h"
@@ -293,6 +294,8 @@ struct UpdateDownloadService::Private {
         }
         if (!options.loopbackEndpoint.isEmpty() && loopbackUrl(options.loopbackEndpoint))
             manager->setProxy(QNetworkProxy::NoProxy);
+        proxyResolver = options.proxyResolverForTests ? options.proxyResolverForTests
+            : std::make_shared<DownloadProxyResolver>();
         timer->setSingleShot(true);
         QObject::connect(timer, &QTimer::timeout, q, [this] {
             finish(failure(release, QStringLiteral("下载更新超时，请检查网络或代理后重试。")));
@@ -302,6 +305,8 @@ struct UpdateDownloadService::Private {
     UpdateDownloadService *q;
     UpdateDownloadOptions options;
     QNetworkAccessManager *manager;
+    std::shared_ptr<DownloadProxyResolver> proxyResolver;
+    int proxyWorkers = 0;
     QTimer *timer;
     QPointer<QNetworkReply> reply;
     std::unique_ptr<QSaveFile> output;
@@ -334,6 +339,7 @@ struct UpdateDownloadService::Private {
 
     void stopNetwork()
     {
+        if (cancelled) cancelled->store(true);
         timer->stop();
         if (reply) {
             auto *old = reply.data();
@@ -347,7 +353,7 @@ struct UpdateDownloadService::Private {
 
     void maybeShutdown()
     {
-        if (!shuttingDown || shutdownEmitted || workerActive || q->isBusy() || completionPending) return;
+        if (!shuttingDown || shutdownEmitted || workerActive || proxyWorkers || q->isBusy() || completionPending) return;
         shutdownEmitted = true;
         QTimer::singleShot(0, q, [this] { emit q->shutdownFinished(); });
     }
@@ -434,6 +440,26 @@ struct UpdateDownloadService::Private {
     }
 
     void request(const QUrl &url, quint64 id)
+    {
+        if (!q->isBusy() || completionPending || generation != id) return;
+        ++proxyWorkers;
+        auto *watcher = new QFutureWatcher<QList<QNetworkProxy>>(q);
+        QObject::connect(watcher, &QFutureWatcher<QList<QNetworkProxy>>::finished, q,
+            [this, watcher, url, id] {
+                const auto proxies = watcher->result();
+                watcher->deleteLater();
+                --proxyWorkers;
+                if (generation != id || !q->isBusy() || completionPending || cancelled->load()) {
+                    maybeShutdown();
+                    return;
+                }
+                applyDownloadProxies(*manager, proxies);
+                sendRequest(url, id);
+            });
+        watcher->setFuture(resolveDownloadProxiesAsync(proxyResolver, url, cancelled));
+    }
+
+    void sendRequest(const QUrl &url, quint64 id)
     {
         if (!q->isBusy() || completionPending || generation != id) return;
         ignoredResponseBytes = 0;

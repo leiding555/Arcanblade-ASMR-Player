@@ -7,6 +7,7 @@
 
 #include "playback/AudioPlayer.h"
 #include "playback/PlaybackProgressCoordinator.h"
+#include "playback/PlaybackDiagnosticLog.h"
 #include "playback/AudioFileValidation.h"
 #include "subtitle/SubtitleFileLoader.h"
 #include "ui/FloatingSubtitleWindow.h"
@@ -292,6 +293,8 @@ void MainWindow::restartForUpdate(const UpdateDownloadResult &result)
 // The unique_ptr still destroys the window with MainWindow, including while visible.
 MainWindow::~MainWindow()
 {
+    m_audioPlayer->endDiagnosticSource(QStringLiteral("window_destroyed"));
+    if (m_playbackDiagnosticLog) m_playbackDiagnosticLog->shutdown();
     if (m_categoryMutationCancelled) m_categoryMutationCancelled->store(true);
     if (m_categoryMutationInProgress) m_categoryMutationLifetime.waitForFinished();
     if (m_updateInstallCancelled) m_updateInstallCancelled->store(true);
@@ -359,6 +362,22 @@ MainWindow::~MainWindow()
         m_systemTrayIcon->hide();
         m_systemTrayIcon->setContextMenu(nullptr);
     }
+}
+
+void MainWindow::setPlaybackDiagnosticLog(PlaybackDiagnosticLog *log)
+{
+    if (m_closing || m_audioGeneration != 0 || m_playbackDiagnosticLog || !log) return;
+    m_playbackDiagnosticLog = log;
+    m_diagnosticShutdownFinished = log->isShutdownFinished();
+    m_audioPlayer->setDiagnosticLog(log);
+    connect(log, &PlaybackDiagnosticLog::shutdownFinished, this, [this] {
+        m_diagnosticShutdownFinished = true;
+        finishCloseIfReady();
+    });
+    connect(log, &QObject::destroyed, this, [this] {
+        m_diagnosticShutdownFinished = true;
+        finishCloseIfReady();
+    });
 }
 
 void MainWindow::createUi()
@@ -1290,7 +1309,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         && !m_subtitleQueryInProgress && !m_subtitleLoadInProgress
         && !m_subtitleChoiceQueryInProgress && !m_preferenceWriteInProgress
         && m_preferenceRequests.isEmpty() && m_progressShutdownFinished && m_coverShutdownFinished
-        && m_workCoverShutdownFinished && m_durationShutdownFinished
+        && m_workCoverShutdownFinished && m_durationShutdownFinished && m_diagnosticShutdownFinished
         && !m_coverMutationInProgress && m_coverMutations.isEmpty() && !m_coverErrorDialog
         && (!m_coverSelectionDialog || m_coverSelectionDialog->isIdle())
         && (!m_workEditDialog || m_workEditDialog->isIdle())
@@ -1353,6 +1372,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
     showPlaybackQueue(false);
     m_progressSourceChanging = true;
     m_audioPlayer->stop();
+    m_audioPlayer->endDiagnosticSource(QStringLiteral("window_closed"));
+    if (m_playbackDiagnosticLog) m_playbackDiagnosticLog->shutdown();
     m_playbackControls->setEnabled(false);
     ++m_subtitleChoiceQueryGeneration;
     m_subtitleChoiceQueryPending = false;
@@ -1399,7 +1420,7 @@ void MainWindow::finishCloseIfReady()
         || m_subtitleLoadInProgress || m_subtitleChoiceQueryInProgress
         || m_preferenceWriteInProgress || !m_preferenceRequests.isEmpty()
         || !m_progressShutdownFinished || !m_coverShutdownFinished || !m_workCoverShutdownFinished
-        || !m_durationShutdownFinished
+        || !m_durationShutdownFinished || !m_diagnosticShutdownFinished
         || (m_chickenRiceTranslateDialog && m_chickenRiceTranslateDialog->isBusy())
         || m_closeScheduled)
         return;
@@ -1838,6 +1859,12 @@ void MainWindow::requestOpenAudio(const QString &path, const QString &libraryRoo
     m_audioRequestedQueueNavigation = navigation;
     m_audioRequestedFromBeginning = fromBeginning;
     m_audioRequestedGeneration = m_audioOpenGeneration;
+    if (m_playbackDiagnosticLog && workId > 0 && fileId > 0)
+        m_playbackDiagnosticLog->record(QStringLiteral("open_requested"),
+            {{QStringLiteral("from_beginning"), fromBeginning}},
+            {{QStringLiteral("work_id"), workId}, {QStringLiteral("audio_file_id"), fileId},
+             {QStringLiteral("request_id"), QString::number(m_audioOpenGeneration)},
+             {QStringLiteral("path"), path}, {QStringLiteral("root"), libraryRoot}});
     m_audioRequestedPath = path;
     m_audioRequestedRoot = libraryRoot;
     m_audioRequestedWorkId = workId;
@@ -1875,6 +1902,13 @@ void MainWindow::startAudioOpen()
         const auto result = watcher->result();
         watcher->deleteLater();
         m_audioOpenInProgress = false;
+        if (m_playbackDiagnosticLog && workId > 0 && fileId > 0)
+            m_playbackDiagnosticLog->record(QStringLiteral("path_validation"),
+                {{QStringLiteral("success"), result.success}, {QStringLiteral("error"), result.errorMessage},
+                 {QStringLiteral("current_request"), !m_closing && generation == m_audioOpenGeneration}},
+                {{QStringLiteral("work_id"), workId}, {QStringLiteral("audio_file_id"), fileId},
+                 {QStringLiteral("request_id"), QString::number(generation)},
+                 {QStringLiteral("path"), result.path}});
         if (!m_closing && generation == m_audioOpenGeneration)
             applyAudioOpenResult(result, generation, workId, fileId, workName, queueEntryId, replacement,
                                  root, navigation, fromBeginning);
@@ -1933,6 +1967,7 @@ void MainWindow::applyAudioOpenResult(const AudioFileValidationResult &result, q
     finishPlaybackDetailTransition();
     // The previous session's final observation precedes the new session query.
     clearKeyboardSeek();
+    m_audioPlayer->endDiagnosticSource(QStringLiteral("source_replaced"));
     saveCurrentPlaybackProgress(true);
     cancelPlaybackRestore(false);
     m_progressSessionActive = false;
@@ -1965,6 +2000,12 @@ void MainWindow::applyAudioOpenResult(const AudioFileValidationResult &result, q
     const auto acceptedWorkName = latestWorkTitle(workId, workName);
     updatePlaybackIdentity(QFileInfo(result.path).fileName(),
         workId > 0 && fileId > 0 ? acceptedWorkName : QString());
+    if (m_playbackDiagnosticLog && workId > 0 && fileId > 0)
+        m_audioPlayer->beginDiagnosticSource(
+            {{QStringLiteral("work_id"), workId}, {QStringLiteral("audio_file_id"), fileId},
+             {QStringLiteral("request_id"), QString::number(requestGeneration)},
+             {QStringLiteral("audio_generation"), QString::number(m_audioGeneration)},
+             {QStringLiteral("path"), result.path}});
     m_audioPlayer->setLocalFile(result.path);
     m_progressSourceChanging = false;
     adoptPlaybackQueue(result.path, workId, fileId, acceptedWorkName, queueEntryId, replacement, navigation);

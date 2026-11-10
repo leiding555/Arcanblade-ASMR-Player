@@ -812,6 +812,9 @@ LibraryPanel::LibraryPanel(QWidget *parent)
         invalidateWorkContextMenu();
         emit editWorkRequested(context.work.id);
     });
+    m_addWorkToCategoryMenu = m_workContextMenu->addMenu(QStringLiteral("添加到分类"));
+    m_addWorkToCategoryMenu->setObjectName(QStringLiteral("libraryAddWorkToCategoryMenu"));
+    m_addWorkToCategoryMenu->menuAction()->setEnabled(false);
     m_openWorkFolderAction = m_workContextMenu->addAction(QStringLiteral("打开作品文件夹"));
     m_openWorkFolderAction->setObjectName(QStringLiteral("libraryOpenWorkFolderAction"));
     m_openWorkFolderAction->setEnabled(false);
@@ -832,9 +835,6 @@ LibraryPanel::LibraryPanel(QWidget *parent)
         invalidateWorkContextMenu();
         emit workReferencesRequested(context.work.id);
     });
-    m_addWorkToCategoryMenu = m_workContextMenu->addMenu(QStringLiteral("添加到分类"));
-    m_addWorkToCategoryMenu->setObjectName(QStringLiteral("libraryAddWorkToCategoryMenu"));
-    m_addWorkToCategoryMenu->menuAction()->setEnabled(false);
     m_removeCurrentCategoryAction = m_workContextMenu->addAction(QStringLiteral("从当前分类移除"));
     m_removeCurrentCategoryAction->setObjectName(QStringLiteral("libraryRemoveCurrentCategoryAction"));
     m_removeCurrentCategoryAction->setVisible(false);
@@ -939,7 +939,7 @@ LibraryPanel::LibraryPanel(QWidget *parent)
     });
     connect(m_allWorksButton, &QToolButton::clicked, this, [this] { setSidebarLocation(false); });
     connect(m_categoriesButton, &QToolButton::clicked, this, [this] {
-        setSidebarLocation(true, m_categoryMode ? m_currentCategoryId : m_lastCategoryId);
+        setSidebarLocation(true);
     });
     connect(m_categoryBackButton, &QToolButton::clicked, this, [this] { setSidebarLocation(true); });
     connect(m_createCategoryButton, &QToolButton::clicked, this, [this] {
@@ -1828,7 +1828,6 @@ void LibraryPanel::setSidebarLocation(bool categories, qint64 categoryId)
         && (!m_categoryMode || m_currentCategoryId != 0);
     m_categoryMode = categories;
     m_currentCategoryId = categories ? categoryId : 0;
-    if (categories) m_lastCategoryId = categoryId;
     updateCategoryFilter();
     if (enteringCategories) {
         for (const auto &category : m_categories)
@@ -1878,8 +1877,6 @@ void LibraryPanel::setCategories(const QVector<WorkCategory> &categories,
         m_categoryCoverRevisions.insert(category.id, ++m_categoryCoverSequence);
     if (m_currentCategoryId > 0 && std::none_of(m_categories.cbegin(), m_categories.cend(),
         [this](const auto &category) { return category.id == m_currentCategoryId; })) m_currentCategoryId = 0;
-    if (m_lastCategoryId > 0 && std::none_of(m_categories.cbegin(), m_categories.cend(),
-        [this](const auto &category) { return category.id == m_lastCategoryId; })) m_lastCategoryId = 0;
     rebuildCategoryRows();
     updateCategoryFilter();
     updatePresentation();

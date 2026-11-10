@@ -1,13 +1,25 @@
 #pragma once
 
 #include <QMediaPlayer>
+#include <QJsonObject>
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QUrl>
 
+#include <memory>
+
 class QAudioOutput;
+class QMediaDevices;
+class QTimer;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+class QAudioBufferOutput;
+#endif
 
 namespace asmr {
+
+class PlaybackDiagnosticLog;
+struct AudioDiagnosticCapture;
 
 class AudioPlayer final : public QObject
 {
@@ -15,6 +27,7 @@ class AudioPlayer final : public QObject
 
 public:
     explicit AudioPlayer(QObject *parent = nullptr);
+    ~AudioPlayer() override;
 
     [[nodiscard]] QMediaPlayer::PlaybackState playbackState() const;
     [[nodiscard]] QMediaPlayer::MediaStatus mediaStatus() const;
@@ -31,6 +44,14 @@ public:
     void setPosition(qint64 position);
     void setVolumePercent(int volume);
 
+    // Optional, passive diagnostics. Context is supplied only for an accepted
+    // library source; external media and existing callers remain unobserved.
+    void setDiagnosticLog(PlaybackDiagnosticLog *log);
+    void beginDiagnosticSource(QJsonObject context);
+    void endDiagnosticSource(QString reason);
+    void diagnosticSnapshot(QString reason);
+    void diagnosticBoundary(QString reason);
+
 signals:
     void mediaStatusChanged(QMediaPlayer::MediaStatus status);
     void durationChanged(qint64 duration);
@@ -40,8 +61,22 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void diagnosticEvent(const QString &event, QJsonObject fields = {});
+    void installDiagnosticCapture();
+    void detachDiagnosticCapture();
+
     QMediaPlayer *m_player;
     QAudioOutput *m_audioOutput;
+    QPointer<PlaybackDiagnosticLog> m_diagnosticLog;
+    QJsonObject m_diagnosticContext;
+    bool m_diagnosticSourceInstalling = false;
+    QMediaDevices *m_diagnosticDevices = nullptr;
+    QTimer *m_diagnosticTimer = nullptr;
+    std::shared_ptr<AudioDiagnosticCapture> m_diagnosticCapture;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    QAudioBufferOutput *m_diagnosticBufferOutput = nullptr;
+    QMetaObject::Connection m_diagnosticBufferConnection;
+#endif
 };
 
 } // namespace asmr

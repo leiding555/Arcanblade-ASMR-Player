@@ -8,6 +8,8 @@
 
 namespace asmr {
 
+class DownloadProxyResolver;
+
 enum class UpdateDownloadState { Idle, Downloading, Preparing, Ready, Failed, Cancelled };
 
 struct UpdateDownloadResult {
@@ -28,6 +30,8 @@ struct UpdateDownloadOptions {
     // Test seam: remap trusted release requests to this HTTP loopback origin.
     // No production setting or non-loopback alternate endpoint is accepted.
     QUrl loopbackEndpoint;
+    // Test seam for proxy preparation/cancellation; no UI or persistent proxy override.
+    std::shared_ptr<DownloadProxyResolver> proxyResolverForTests;
 };
 
 // Owns download/preparation across About window lifetimes. Construction never

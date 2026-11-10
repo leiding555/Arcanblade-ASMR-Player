@@ -4,11 +4,13 @@
 #include "update/ApplicationVersion.h"
 #include "update/UpdatePackage.h"
 #include "update/UpdateInstaller.h"
+#include "playback/PlaybackDiagnosticLog.h"
 
 #include <QApplication>
 #include <QDir>
 #include <QMessageBox>
 #include <QTimer>
+#include <QStandardPaths>
 
 int main(int argc, char *argv[])
 {
@@ -25,7 +27,14 @@ int main(int argc, char *argv[])
     }
 #endif
 
+    const auto dataDirectory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    asmr::PlaybackDiagnosticLogOptions diagnosticOptions;
+    // An unavailable data location must not become a relative working directory.
+    if (!dataDirectory.isEmpty())
+        diagnosticOptions.directory = QDir(dataDirectory).filePath(QStringLiteral("Logs"));
+    asmr::PlaybackDiagnosticLog diagnosticLog(diagnosticOptions);
     asmr::MainWindow window;
+    window.setPlaybackDiagnosticLog(&diagnosticLog);
     window.show();
     asmr::confirmUpdateStartup(app.arguments(), asmr::applicationBuildVersion());
     // Network checks belong to application startup, so constructing a window
