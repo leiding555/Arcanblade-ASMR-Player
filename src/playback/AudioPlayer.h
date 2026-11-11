@@ -10,7 +10,6 @@
 #include <memory>
 
 class QAudioOutput;
-class QMediaDevices;
 class QTimer;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
 class QAudioBufferOutput;
@@ -61,6 +60,7 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void synchronizeDefaultOutput(const QString &reason);
     void diagnosticEvent(const QString &event, QJsonObject fields = {});
     void installDiagnosticCapture();
     void detachDiagnosticCapture();
@@ -70,7 +70,6 @@ private:
     QPointer<PlaybackDiagnosticLog> m_diagnosticLog;
     QJsonObject m_diagnosticContext;
     bool m_diagnosticSourceInstalling = false;
-    QMediaDevices *m_diagnosticDevices = nullptr;
     QTimer *m_diagnosticTimer = nullptr;
     std::shared_ptr<AudioDiagnosticCapture> m_diagnosticCapture;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)

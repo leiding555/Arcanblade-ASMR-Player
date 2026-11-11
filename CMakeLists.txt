@@ -207,6 +207,45 @@ add_library(AsmrFasterWhisper STATIC
 )
 target_include_directories(AsmrFasterWhisper PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(AsmrFasterWhisper PUBLIC AsmrAiSubtitle AsmrDownloadNetwork Qt6::Core Qt6::Network)
+# An unmodified standalone binary, matching source and licenses are shipped together.
+set(_sevenzip_root "${CMAKE_CURRENT_SOURCE_DIR}/resources/7zip")
+file(READ "${_sevenzip_root}/SOURCE.json" _sevenzip_manifest)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sevenzip_root}/SOURCE.json")
+string(JSON _sevenzip_version GET "${_sevenzip_manifest}" Version)
+string(JSON _sevenzip_count LENGTH "${_sevenzip_manifest}" Files)
+math(EXPR _sevenzip_last "${_sevenzip_count} - 1")
+set(_sevenzip_notices SOURCE.json)
+foreach(_i RANGE 0 ${_sevenzip_last})
+    string(JSON _sevenzip_file GET "${_sevenzip_manifest}" Files ${_i} File)
+    string(JSON _sevenzip_hash GET "${_sevenzip_manifest}" Files ${_i} Sha256)
+    file(SHA256 "${_sevenzip_root}/${_sevenzip_file}" _sevenzip_actual)
+    if(NOT _sevenzip_actual STREQUAL _sevenzip_hash)
+        message(FATAL_ERROR "Bundled 7-Zip hash mismatch: ${_sevenzip_file}")
+    endif()
+    if(_sevenzip_file STREQUAL "7za.exe")
+        set(_sevenzip_binary_hash "${_sevenzip_hash}")
+    else()
+        list(APPEND _sevenzip_notices "${_sevenzip_file}")
+    endif()
+endforeach()
+target_compile_definitions(AsmrFasterWhisper PRIVATE
+    ARCANBLADE_SEVENZIP_VERSION="${_sevenzip_version}"
+    ARCANBLADE_SEVENZIP_SHA256="${_sevenzip_binary_hash}")
+function(arcanblade_deploy_sevenzip target)
+    if(WIN32)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/tools/7zip"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_sevenzip_root}/7za.exe"
+                "$<TARGET_FILE_DIR:${target}>/tools/7zip/7za.exe"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/licenses/7zip"
+            VERBATIM)
+        foreach(_notice IN LISTS _sevenzip_notices)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_sevenzip_root}/${_notice}"
+                    "$<TARGET_FILE_DIR:${target}>/licenses/7zip/${_notice}" VERBATIM)
+        endforeach()
+    endif()
+endfunction()
 if(MSVC)
     target_compile_options(AsmrFasterWhisper PRIVATE /W4 /utf-8)
 else()
@@ -460,6 +499,7 @@ else()
 endif()
 
 target_sources(AsmrPlayer PRIVATE src/ui/LibraryTrackTreeModel.h src/ui/LibraryTrackTreeModel.cpp)
+arcanblade_deploy_sevenzip(AsmrPlayer)
 
 
 # Explicit development-only reset tool: backups precede any database replacement.

@@ -1,6 +1,7 @@
 #include "ai/FasterWhisperArchive.h"
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
@@ -13,7 +14,6 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSet>
-#include <QStandardPaths>
 #include <QStringDecoder>
 #include <limits>
 
@@ -102,23 +102,12 @@ bool safeFile(const QString &root, const QString &relative, QString *error)
     }
     return true;
 }
-QString systemTar()
+bool runSevenZip(const QString &program, const QStringList &arguments, const QString &workingDirectory,
+                 bool listing, const std::atomic_bool &cancelled, QByteArray &output, QString *error)
 {
-#ifdef Q_OS_WIN
-    wchar_t buffer[MAX_PATH + 1]{};
-    const UINT count = GetSystemDirectoryW(buffer, MAX_PATH);
-    if (count == 0 || count >= MAX_PATH) return {};
-    return QDir(QString::fromWCharArray(buffer, int(count))).filePath(QStringLiteral("tar.exe"));
-#else
-    return QStandardPaths::findExecutable(QStringLiteral("bsdtar"));
-#endif
-}
-bool tarListing(const QString &archive, bool verbose, const std::atomic_bool &cancelled,
-                QByteArray &output, QString *error)
-{
-    const auto program = systemTar();
-    if (program.isEmpty() || !QFileInfo(program).isFile())
-        return fail(error, QStringLiteral("System tar with 7z support was not found."));
+    if (cancelled.load()) return fail(error, QStringLiteral("Archive operation cancelled."));
+    if (!QFileInfo(program).isAbsolute() || !QFileInfo(program).isFile() || !safeAncestors(program))
+        return fail(error, QStringLiteral("Packaged 7-Zip executable is missing or unsafe: %1").arg(program));
     QProcess process;
 #ifdef Q_OS_WIN
     process.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) {
@@ -126,34 +115,75 @@ bool tarListing(const QString &archive, bool verbose, const std::atomic_bool &ca
     });
 #endif
     process.setProgram(program);
-    process.setArguments({verbose ? QStringLiteral("-tvf") : QStringLiteral("-tf"), archive});
+    process.setArguments(arguments);
+    if (!workingDirectory.isEmpty()) process.setWorkingDirectory(workingDirectory);
     process.setStandardInputFile(QProcess::nullDevice());
     process.start();
     QElapsedTimer clock;
     clock.start();
     QByteArray diagnostic;
+    const auto drain = [&] {
+        const auto bytes = process.readAllStandardOutput();
+        output += bytes.left((listing ? MaximumListingBytes + 1 : qsizetype(65536)) - output.size());
+        diagnostic += process.readAllStandardError().left(65537 - diagnostic.size());
+    };
     while (process.state() != QProcess::NotRunning) {
         process.waitForFinished(50);
-        output += process.readAllStandardOutput();
-        diagnostic += process.readAllStandardError();
-        if (cancelled.load() || clock.elapsed() > 120000 || output.size() > MaximumListingBytes
+        drain();
+        if (cancelled.load() || clock.elapsed() > (listing ? 120000 : 30 * 60 * 1000)
+            || output.size() > MaximumListingBytes
             || diagnostic.size() > 64 * 1024) {
             process.kill();
             process.waitForFinished(5000);
-            return fail(error, cancelled.load() ? QStringLiteral("Archive inspection cancelled.")
-                : QStringLiteral("Archive listing exceeded its time or output limit."));
+            return fail(error, cancelled.load() ? QStringLiteral("Archive operation cancelled.")
+                : QStringLiteral("7-Zip %1 exceeded its time or output limit.")
+                    .arg(listing ? QStringLiteral("inspection") : QStringLiteral("extraction")));
         }
     }
-    output += process.readAllStandardOutput();
-    diagnostic += process.readAllStandardError();
-    if (cancelled.load()) return fail(error, QStringLiteral("Archive inspection cancelled."));
+    drain();
+    if (cancelled.load()) return fail(error, QStringLiteral("Archive operation cancelled."));
     if (process.error() == QProcess::FailedToStart || process.exitStatus() != QProcess::NormalExit
         || process.exitCode() != 0 || output.size() > MaximumListingBytes || !diagnostic.trimmed().isEmpty())
-        return fail(error, QStringLiteral("System tar could not safely list this 7z archive: %1")
-            .arg(QString::fromLocal8Bit(diagnostic.left(2048)).trimmed()));
+        return fail(error, QStringLiteral("7-Zip %1 failed (version %2; tool %3; exit %4): %5 %6")
+            .arg(listing ? QStringLiteral("inspection") : QStringLiteral("extraction"),
+                 QStringLiteral(ARCANBLADE_SEVENZIP_VERSION), program)
+            .arg(process.exitCode()).arg(process.errorString(),
+                QString::fromUtf8((diagnostic.isEmpty() ? output : diagnostic).left(2048)).trimmed()));
     return true;
 }
 } // namespace
+
+QString fasterWhisperArchiveToolPath()
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("tools/7zip/7za.exe"));
+}
+
+bool validateFasterWhisperArchiveTool(const QString &path, QString *error)
+{
+    if (error) error->clear();
+    const QFileInfo info(path);
+    QFile file(path);
+    if (!info.isAbsolute() || !info.isFile() || !safeAncestors(path) || !file.open(QIODevice::ReadOnly))
+        return fail(error, QStringLiteral("Packaged 7-Zip %1 is missing or unreadable: %2. Restore the complete application package.")
+            .arg(QStringLiteral(ARCANBLADE_SEVENZIP_VERSION), path));
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (info.size() > 8 * 1024 * 1024 || !hash.addData(&file)
+        || hash.result().toHex() != QByteArray(ARCANBLADE_SEVENZIP_SHA256))
+        return fail(error, QStringLiteral("Packaged 7-Zip %1 SHA-256 verification failed: %2. Restore the complete application package.")
+            .arg(QStringLiteral(ARCANBLADE_SEVENZIP_VERSION), path));
+    return true;
+}
+
+QString extractFasterWhisperArchive(const QString &program, const QString &archive,
+    const QString &staging, const std::atomic_bool &cancelled)
+{
+    QByteArray output;
+    QString error;
+    (void)runSevenZip(program, {QStringLiteral("x"), QStringLiteral("-t7z"), QStringLiteral("-y"),
+        QStringLiteral("-bd"), QStringLiteral("-bb0"), QStringLiteral("-sccUTF-8"),
+        QStringLiteral("-o") + staging, QStringLiteral("--"), archive}, staging, false, cancelled, output, &error);
+    return error;
+}
 
 FasterWhisperArchiveInspection inspectFasterWhisperArchive(
     const QString &path, const std::atomic_bool &cancelled, qint64 maximumUnpackedBytes)
@@ -169,41 +199,55 @@ FasterWhisperArchiveInspection inspectFasterWhisperArchive(
         || !archive.open(QIODevice::ReadOnly) || archive.read(6) != QByteArray::fromHex("377abcaf271c"))
         return reject(QStringLiteral("Cannot read a regular, supported 7z archive."));
     archive.close();
-    QByteArray namesBytes, verboseBytes;
+    QByteArray listing;
     QString error;
-    if (!tarListing(path, false, cancelled, namesBytes, &error)
-        || !tarListing(path, true, cancelled, verboseBytes, &error)) return reject(error);
+    const auto program = fasterWhisperArchiveToolPath();
+    if (!validateFasterWhisperArchiveTool(program, &error)
+        || !runSevenZip(program, {QStringLiteral("l"), QStringLiteral("-t7z"), QStringLiteral("-slt"),
+            QStringLiteral("-ba"), QStringLiteral("-sccUTF-8"), QStringLiteral("--"), path},
+            {}, true, cancelled, listing, &error)) return reject(error);
     const auto after = QFileInfo(path);
     if (!after.isFile() || !safeAncestors(after.absoluteFilePath()) || before.size() != after.size()
         || before.lastModified() != after.lastModified())
         return reject(QStringLiteral("Archive changed during inspection."));
-    auto names = namesBytes.split('\n');
-    auto verbose = verboseBytes.split('\n');
-    if (!names.isEmpty() && names.last().isEmpty()) names.removeLast();
-    if (!verbose.isEmpty() && verbose.last().isEmpty()) verbose.removeLast();
-    if (names.isEmpty() || names.size() > MaximumEntries || names.size() != verbose.size())
-        return reject(QStringLiteral("Archive listing is empty, oversized, or inconsistent."));
+    QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+    QString text = decoder.decode(listing);
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    if (decoder.hasError() || text.contains(QLatin1Char('\r')) || text.contains(QChar::Null))
+        return reject(QStringLiteral("Unsupported or ambiguous archive filename encoding."));
     QSet<QString> seen;
-    const QRegularExpression metadata(QStringLiteral(
-        "^([d-])[rwxstST-]{9}[+@]?\\s+\\d+\\s+\\S+\\s+\\S+\\s+(\\d+)\\s+.+\\s+$"));
-    for (qsizetype i = 0; i < names.size(); ++i) {
+    const QSet<QString> fields{QStringLiteral("Path"), QStringLiteral("Size"), QStringLiteral("Packed Size"),
+        QStringLiteral("Modified"), QStringLiteral("Created"), QStringLiteral("Accessed"),
+        QStringLiteral("Attributes"), QStringLiteral("CRC"), QStringLiteral("Encrypted"),
+        QStringLiteral("Method"), QStringLiteral("Block")};
+    const QRegularExpression attributes(QStringLiteral("^[DASHRCOINTE_VX]*(?: [d-][rwxstST-]{9})?$"));
+    const QRegularExpression decimal(QStringLiteral("^[0-9]+$"));
+    const auto records = text.split(QStringLiteral("\n\n"), Qt::SkipEmptyParts);
+    if (records.isEmpty() || records.size() > MaximumEntries)
+        return reject(QStringLiteral("Archive listing is empty or oversized."));
+    for (const auto &record : records) {
         if (cancelled.load()) return reject(QStringLiteral("Archive inspection cancelled."));
-        auto rawName = names.at(i);
-        auto rawVerbose = verbose.at(i);
-        if (rawName.endsWith('\r')) rawName.chop(1);
-        if (rawVerbose.endsWith('\r')) rawVerbose.chop(1);
-        QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
-        const QString name = decoder.decode(rawName);
-        if (decoder.hasError() || rawVerbose.size() <= rawName.size()
-            || !rawVerbose.endsWith(rawName) || rawVerbose.at(rawVerbose.size() - rawName.size() - 1) != ' ')
-            return reject(QStringLiteral("Unsupported or ambiguous archive filename encoding."));
-        const QString prefix = QString::fromLocal8Bit(rawVerbose.left(rawVerbose.size() - rawName.size()));
-        const auto match = metadata.match(prefix);
-        if (!match.hasMatch()) return reject(QStringLiteral("Unsupported archive member type or listing metadata."));
-        const bool directory = match.captured(1) == QStringLiteral("d");
+        QHash<QString, QString> values;
+        for (const auto &line : record.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+            const auto at = line.indexOf(QStringLiteral(" = "));
+            const auto field = line.left(at);
+            if (at < 0 || !fields.contains(field) || values.contains(field))
+                return reject(QStringLiteral("Unsupported, linked, or ambiguous 7z member metadata."));
+            values.insert(field, line.mid(at + 3));
+        }
+        for (const auto &required : {QStringLiteral("Path"), QStringLiteral("Size"),
+                 QStringLiteral("Attributes"), QStringLiteral("Encrypted")})
+            if (!values.contains(required)) return reject(QStringLiteral("Incomplete 7z member metadata."));
+        if (!attributes.match(values.value(QStringLiteral("Attributes"))).hasMatch()
+            || values.value(QStringLiteral("Encrypted")) != QStringLiteral("-"))
+            return reject(QStringLiteral("Unsupported, encrypted, or linked archive member."));
+        const bool directory = values.value(QStringLiteral("Attributes")).contains(QLatin1Char('D'))
+            || values.value(QStringLiteral("Attributes")).contains(QStringLiteral(" d"));
+        const auto name = values.value(QStringLiteral("Path")).replace(QLatin1Char('\\'), QLatin1Char('/'));
         bool numberOk = false;
-        const qint64 size = match.captured(2).toLongLong(&numberOk);
-        if (!numberOk || size < 0 || (directory && size != 0) || !safeRelativePath(name, directory)
+        const auto sizeText = values.value(QStringLiteral("Size"));
+        const qint64 size = sizeText.toLongLong(&numberOk);
+        if (!numberOk || !decimal.match(sizeText).hasMatch() || size < 0 || (directory && size != 0) || !safeRelativePath(name, directory)
             || seen.contains(key(name)) || size > maximumUnpackedBytes - result.unpackedBytes)
             return reject(QStringLiteral("Unsafe, duplicate, or oversized archive entry."));
         seen.insert(key(name));

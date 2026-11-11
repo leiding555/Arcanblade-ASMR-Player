@@ -18,10 +18,16 @@ struct FasterWhisperArchiveInspection {
     QString error;
     [[nodiscard]] bool success() const { return error.isEmpty() && !entries.isEmpty(); }
 };
-// Inspect a verified 7z with system bsdtar, without extracting or executing it.
+// The packaged, pinned standalone 7-Zip. Never search PATH or the registry.
+[[nodiscard]] QString fasterWhisperArchiveToolPath();
+[[nodiscard]] bool validateFasterWhisperArchiveTool(const QString &path, QString *error = nullptr);
+// Inspect a verified 7z without extracting or executing its contents.
 [[nodiscard]] FasterWhisperArchiveInspection inspectFasterWhisperArchive(
     const QString &path, const std::atomic_bool &cancelled,
     qint64 maximumUnpackedBytes = 16LL * 1024 * 1024 * 1024);
+// The caller checks test overrides; production always uses the pinned tool above.
+[[nodiscard]] QString extractFasterWhisperArchive(const QString &program, const QString &archive,
+    const QString &staging, const std::atomic_bool &cancelled);
 // Reject reparse points, undeclared files and size mismatches after extraction.
 [[nodiscard]] bool validateFasterWhisperExtracted(const QString &staging,
     const FasterWhisperArchiveInspection &inspection, const std::atomic_bool &cancelled,

@@ -1,5 +1,5 @@
 Arcanblade 第三方组件说明
-核对日期：2026-11-07
+核对日期：2026-11-11
 
 原创内容
 
@@ -62,6 +62,13 @@ Arcanblade 的原创代码及原创图标采用 MIT 许可证，详见根目录 
    对应模型卡：https://huggingface.co/Systran/faster-whisper-large-v2/blob/f0fe81560cb8b68660e564f55dd99207059c092e/README.md
 
 其他运行时依赖
+
+随播放器提供 7-Zip Extra 26.06 的未修改 x64 独立命令行工具 7za.exe，
+用于 Faster-Whisper-XXL 归档检查和解压；Copyright (C) 1999-2026 Igor Pavlov。
+适用 GNU LGPL 2.1 或更新版本，以及包内所列 BSD 许可。对应许可全文、
+上游声明和完整源码包位于 licenses/7zip，固定来源和摘要见该目录 SOURCE.json。
+上游来源：https://github.com/ip7z/7zip/releases/tag/26.06
+源码仓库对应材料位于 resources/7zip；这不是 AI 引擎或模型。
 
 播放器使用 Qt 等运行时库，其许可证及第三方依赖声明同样适用。
 实际运行包应按所分发的库和插件提供相应许可材料。

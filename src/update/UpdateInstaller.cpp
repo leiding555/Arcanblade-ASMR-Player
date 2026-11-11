@@ -249,7 +249,8 @@ bool safeRelativePath(const std::string &path)
     const std::set<std::string> userExtensions{ ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".srt", ".vtt", ".lrc", ".sqlite", ".sqlite3", ".db", ".ini", ".key", ".pem", ".pfx", ".env" };
     std::transform(filename.begin(), filename.end(), filename.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     return userExtensions.count(extension) == 0 && filename != ".env"
-        && (extension != ".exe" || path == "Arcanblade.exe" || path == "ArcanbladeUpdater.exe");
+        && (extension != ".exe" || path == "Arcanblade.exe" || path == "ArcanbladeUpdater.exe"
+            || path == "tools/7zip/7za.exe");
 }
 
 bool managedFilePath(const std::string &path)
@@ -264,6 +265,7 @@ bool managedFilePath(const std::string &path)
     }
     const auto directory = key.substr(0, slash);
     if (directory == "licenses") return true;
+    if (path == "tools/7zip/7za.exe") return true;
     const std::set<std::string> plugins{"platforms", "sqldrivers", "multimedia", "tls", "imageformats", "iconengines", "styles", "networkinformation", "generic", "platforminputcontexts", "platformthemes", "printsupport", "audio", "plugins"};
     return plugins.count(directory) != 0 && key.ends_with(".dll");
 }

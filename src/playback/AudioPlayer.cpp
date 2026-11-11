@@ -125,6 +125,13 @@ AudioPlayer::AudioPlayer(QObject *parent)
             [this] { diagnosticSnapshot(QStringLiteral("output_volume_changed")); });
     connect(m_audioOutput, &QAudioOutput::mutedChanged, this,
             [this] { diagnosticSnapshot(QStringLiteral("output_muted_changed")); });
+
+    auto *devices = new QMediaDevices(this);
+    connect(devices, &QMediaDevices::audioOutputsChanged, this, [this] {
+        const auto reason = QStringLiteral("audio_outputs_changed");
+        synchronizeDefaultOutput(reason);
+        diagnosticSnapshot(reason);
+    });
 }
 
 AudioPlayer::~AudioPlayer()
@@ -182,6 +189,7 @@ void AudioPlayer::setLocalFile(const QString &path)
 
 void AudioPlayer::play()
 {
+    synchronizeDefaultOutput(QStringLiteral("before_play"));
     diagnosticEvent(QStringLiteral("play_requested"));
     m_player->play();
 }
@@ -216,16 +224,25 @@ void AudioPlayer::setVolumePercent(int volume)
     m_audioOutput->setVolume(static_cast<float>(volume) / 100.0f);
 }
 
+void AudioPlayer::synchronizeDefaultOutput(const QString &reason)
+{
+    const auto defaultDevice = QMediaDevices::defaultAudioOutput();
+    const auto previousDevice = m_audioOutput->device();
+    if (defaultDevice.isNull() || previousDevice.id() == defaultDevice.id()) return;
+
+    m_audioOutput->setDevice(defaultDevice);
+    diagnosticEvent(QStringLiteral("default_output_synchronized"),
+        {{QStringLiteral("reason"), reason},
+         {QStringLiteral("previous_output_device"), audioDevice(previousDevice)},
+         {QStringLiteral("default_output_device"), audioDevice(defaultDevice)},
+         {QStringLiteral("output_device"), audioDevice(m_audioOutput->device())}});
+}
+
 void AudioPlayer::setDiagnosticLog(PlaybackDiagnosticLog *log)
 {
     if (m_diagnosticLog == log) return;
     endDiagnosticSource(QStringLiteral("diagnostic_log_changed"));
     m_diagnosticLog = log;
-    if (log && !m_diagnosticDevices) {
-        m_diagnosticDevices = new QMediaDevices(this);
-        connect(m_diagnosticDevices, &QMediaDevices::audioOutputsChanged, this,
-            [this] { diagnosticSnapshot(QStringLiteral("audio_outputs_changed")); });
-    }
 }
 
 void AudioPlayer::beginDiagnosticSource(QJsonObject context)

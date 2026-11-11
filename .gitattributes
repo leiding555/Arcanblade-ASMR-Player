@@ -1,0 +1,2 @@
+# Preserve upstream bytes used by the pinned binary/source/license manifest.
+resources/7zip/* -text

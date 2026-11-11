@@ -1,0 +1,30 @@
+{
+  "Version": "26.06",
+  "Architecture": "x64",
+  "BinarySource": "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-extra.7z",
+  "BinaryArchiveSha256": "396c180f12d2247c24b0b1fcd482c6fc2a2700f61211ffede1061dd971f5e104",
+  "BinaryMember": "x64/7za.exe",
+  "SourceArchive": "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-src.tar.xz",
+  "Files": [
+    {
+      "File": "7za.exe",
+      "Sha256": "dd3757f31c97e33776f2590317d4fb12f2da075db3dbb1e3f94d0f2a01d84ffa"
+    },
+    {
+      "File": "License.txt",
+      "Sha256": "39d2187b942cc88818dd959e53c6b7dddd152097a42061467c4d56050168d646"
+    },
+    {
+      "File": "COPYING.LGPL.txt",
+      "Sha256": "1e7e6bae5a5bde32f1ae5a7c37a082d1ab03cf89354f7f936ac40be9e39a6531"
+    },
+    {
+      "File": "readme.txt",
+      "Sha256": "2c4ff75bfd65fb994b51d68f579b8d64ba9199c72b4cd88af0103f8bea390d03"
+    },
+    {
+      "File": "7z2606-src.tar.xz",
+      "Sha256": "a4e374c8f864f51df48c2cfd0e1413ec3b2ea030deae852d6a655402ebb61ac4"
+    }
+  ]
+}

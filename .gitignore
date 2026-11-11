@@ -23,6 +23,7 @@ Testing/
 *.pdb
 *.ilk
 *.exe
+!resources/7zip/7za.exe
 *.dll
 /dist/
 

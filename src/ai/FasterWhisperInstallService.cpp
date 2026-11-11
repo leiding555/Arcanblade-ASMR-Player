@@ -18,7 +18,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QProcess>
 #include <QPromise>
 #include <QPointer>
 #include <QRegularExpression>
@@ -299,53 +298,6 @@ bool backoff(int attempt, const std::atomic_bool &cancelled)
         QThread::msleep(20);
     return !cancelled.load();
 }
-QString systemTar()
-{
-#ifdef Q_OS_WIN
-    wchar_t path[MAX_PATH + 1]{};
-    const UINT length = GetSystemDirectoryW(path, MAX_PATH);
-    return length > 0 && length < MAX_PATH
-        ? QDir(QString::fromWCharArray(path, int(length))).filePath(QStringLiteral("tar.exe")) : QString{};
-#else
-    return QStringLiteral("/usr/bin/tar");
-#endif
-}
-QString extractArchive(const QString &program, const QString &zip, const QString &staging,
-    const std::atomic_bool &cancelled)
-{
-    if (!QFileInfo(program).isAbsolute() || !QFileInfo(program).isFile())
-        return QStringLiteral("The absolute system tar executable is unavailable.");
-    QProcess process;
-    process.setProgram(program);
-    process.setArguments({QStringLiteral("-xf"), zip, QStringLiteral("-C"), staging});
-    process.setWorkingDirectory(staging);
-    process.setProcessChannelMode(QProcess::MergedChannels);
-    process.start();
-    QElapsedTimer timer;
-    timer.start();
-    QByteArray diagnostic;
-    bool timedOut = false;
-    while (process.state() != QProcess::NotRunning) {
-        process.waitForFinished(50);
-        const QByteArray block = process.readAll();
-        if (diagnostic.size() < 65536)
-            diagnostic += block.left(65536 - diagnostic.size());
-        if (cancelled.load() || timer.elapsed() > 30 * 60 * 1000) {
-            timedOut = !cancelled.load();
-            process.kill();
-            process.waitForFinished(5000);
-            break;
-        }
-    }
-    if (cancelled.load())
-        return QStringLiteral("Extraction cancelled.");
-    if (timedOut)
-        return QStringLiteral("Extraction timed out.");
-    if (process.error() == QProcess::FailedToStart || process.exitStatus() != QProcess::NormalExit
-        || process.exitCode() != 0)
-        return QStringLiteral("System tar failed: %1 %2").arg(process.errorString(), QString::fromLocal8Bit(diagnostic));
-    return {};
-}
 bool removeOwnedStage(const QString &root, const QString &stage, const QString &id)
 {
     const QString marker = stage + QStringLiteral(".owner.json");
@@ -613,7 +565,8 @@ Result installPackage(const Request &request, const std::atomic_bool &cancelled,
             result.engineDirectory = destination;
             result.warnings += cleanupOwnedCache(root, cache, id, {archiveName});
         } else {
-            QString program = systemTar();
+            QString program = fasterWhisperArchiveToolPath();
+            if (!validateFasterWhisperArchiveTool(program, &error)) return fail(error);
             if (!request.extractionProgramForTests.isEmpty()) {
                 const bool allLoopback = loopback(file.url)
                     && std::all_of(request.package.modelFiles.cbegin(), request.package.modelFiles.cend(),
@@ -623,7 +576,7 @@ Result installPackage(const Request &request, const std::atomic_bool &cancelled,
                 program = request.extractionProgramForTests;
             }
             if (!QFileInfo(program).isAbsolute() || !QFileInfo(program).isFile())
-                return fail(QStringLiteral("The absolute system tar executable is unavailable."));
+                return fail(QStringLiteral("The absolute archive executable is unavailable."));
             if (!prepareCache(cache, id, {archiveName}, &error))
                 return fail(error);
             error = downloadFile(manager, archivePath, file, request, cancelled, report,
@@ -648,7 +601,7 @@ Result installPackage(const Request &request, const std::atomic_bool &cancelled,
             StageGuard guard{root, stage, id};
             report({State::Extracting, 0, inspection.unpackedBytes,
                 QStringLiteral("Extracting verified Faster-Whisper-XXL"), QStringLiteral("engine")});
-            error = extractArchive(program, archivePath, stage, cancelled);
+            error = extractFasterWhisperArchive(program, archivePath, stage, cancelled);
             if (error.isEmpty() && !validateFasterWhisperExtracted(stage, inspection, cancelled, &error)
                 && error.isEmpty())
                 error = QStringLiteral("Extracted files did not match the checked archive.");
