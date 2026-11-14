@@ -5,15 +5,15 @@
   </picture>
 </p>
 
-<h1 align="center">Arcanblade (Windows)</h1>
+<h1 align="center">Arcanblade (Windows / 手机网页)</h1>
 
 <p align="center">
   <strong>管理音声作品与字幕，AI识别音频并生成中文字幕。</strong>
 </p>
 
 <p align="center">
-  面向 Windows 的 ASMR 音声管理与播放器，支持字幕自动匹配与同步显示。<br>
-  离线生成中文字幕，或先识别日文，再结合<strong>作品级上下文</strong>润色与翻译。
+  面向 Windows 的 ASMR 音声管理工具与播放器，支持字幕自动匹配和同步显示。<br>
+  可离线生成中文字幕，也可先识别日文，再结合<strong>作品级上下文</strong>润色与翻译。
 </p>
 
 <p align="center">
@@ -119,7 +119,11 @@
 <details>
 <summary><strong>4. 把离线库添加到手机桌面</strong>（点击展开 / 收起）</summary>
 
-先在局域网作品库右上角点 **离线库**，或直接打开 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)。在显示 **离线库** 的页面执行以下操作。
+先在局域网作品库右上角点 **离线库**，或用手机浏览器联网打开一次 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)，等待页面加载完成。
+
+**推荐把离线库网址加入浏览器书签。** 页面缓存完成后，即使手机断网，也可以在同一个浏览器里从书签或地址栏打开离线库，播放已导入的音轨并查看字幕。
+
+如果更习惯从手机桌面打开，也可以在离线库页面添加桌面图标。
 
 - **Android（Chrome）**。点浏览器右上角 **⋮ → 安装并创建快捷方式**，按提示完成。不同版本也可能显示 **添加到主屏幕** 或 **安装应用**。 [Chrome 使用说明](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=zh-Hans)
 
