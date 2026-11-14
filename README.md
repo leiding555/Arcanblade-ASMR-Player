@@ -67,7 +67,8 @@
 
 在 Windows 端打开 **设置 → 手机播放**，即可用手机浏览器播放电脑上的音声和同步字幕。局域网播放期间，电脑需要保持 Arcanblade 运行并开启共享。音轨导入手机离线库后，即使电脑关机、手机断网，也能播放已导入的内容。
 
-#### 1. 设置 Windows 专用网络和防火墙
+<details>
+<summary><strong>1. 设置 Windows 专用网络和防火墙</strong>（点击展开 / 收起）</summary>
 
 1. **让电脑和手机连接同一局域网。** 两台设备可以连接同一个家庭 Wi‑Fi，电脑也可以通过网线连接到同一路由器。
 2. **将电脑当前连接的家庭网络设为「专用网络」。** 打开 Windows **设置 → 网络和 Internet**，进入当前连接的 **WLAN（Wi‑Fi）** 或 **以太网** 属性，在 **网络配置文件类型** 中选择 **专用网络**。仅对自己信任的网络使用此设置。 [微软网络设置说明](https://support.microsoft.com/en-us/windows/experience/connectivity-networking/essential-network-settings-and-tasks-in-windows)
@@ -78,7 +79,10 @@
 
    <img src="assets/screenshots/internet1.png" width="400" alt="Windows 防火墙提示中仅勾选专用网络">
 
-#### 2. 用手机扫码配对
+</details>
+
+<details>
+<summary><strong>2. 用手机扫码配对</strong>（点击展开 / 收起）</summary>
 
 1. 在电脑端打开 **设置 → 手机播放**，在 **网络接口** 中选择手机所在局域网对应的 **WLAN** 或 **以太网**，点击 **开启共享**。
 2. 用手机相机扫描电脑上的二维码，在手机浏览器打开链接。扫码链接会自动配对。如果在微信或 QQ 内打开后看到提示，请把完整链接复制到手机浏览器打开。
@@ -93,7 +97,10 @@
 
 如果扫码后网页打不开，先确认电脑仍在共享、网络接口选对了，并检查 Windows 的专用网络及防火墙设置。若手机连的是访客 Wi‑Fi，可换到家里的主 Wi‑Fi 再试。
 
-#### 3. 导出到手机离线库
+</details>
+
+<details>
+<summary><strong>3. 导出到手机离线库</strong>（点击展开 / 收起）</summary>
 
 1. 在手机的局域网 **作品库** 点击 **导出到离线库**。
 2. 勾选整部作品，或点击 **展开** 后只勾选需要的音轨。一次可以选择多部作品。
@@ -104,7 +111,10 @@
 
 如果自动导出失败，可在局域网网页打开作品详情，点击 **下载离线包**，选好音轨后点击 **下载压缩包**。下载完成后，打开 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)，点击 **导入离线包**，选择刚下载的 ZIP。确认导入和播放正常后，可以删除下载目录中的 ZIP。
 
-#### 4. 把离线库添加到手机桌面
+</details>
+
+<details>
+<summary><strong>4. 把离线库添加到手机桌面</strong>（点击展开 / 收起）</summary>
 
 先在局域网作品库右上角点 **离线库**，或直接打开 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)。在显示 **离线库** 的页面执行以下操作。
 
@@ -115,6 +125,8 @@
 - **iPhone（Safari）**。点 **分享 → 添加到主屏幕**。如果显示 **作为网页 App 打开**，开启后点 **添加**。 [Safari 使用说明](https://support.apple.com/zh-cn/guide/iphone/open-as-web-app-iphea86e5236/ios)
 
 添加后，从桌面图标打开离线库，确认已导入的作品可见。可开启飞行模式，试听一条音轨并检查字幕。如果桌面入口看不到作品，用原来导入时的浏览器标签页检查。不同浏览器或不同入口可能使用独立的站点存储。
+
+</details>
 
 ### 三、AI 字幕
 
