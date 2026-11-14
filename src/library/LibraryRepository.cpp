@@ -330,8 +330,8 @@ LibraryOperationResult prepareImportFiles(const DirectoryScanResult &scan,
 
 } // namespace
 
-LibraryRepository::LibraryRepository(QString databasePath)
-    : m_databasePath(std::move(databasePath)),
+LibraryRepository::LibraryRepository(QString databasePath, Access access)
+    : m_databasePath(std::move(databasePath)), m_access(access),
       m_connectionName(QStringLiteral("asmr-library-") + QUuid::createUuid().toString(QUuid::WithoutBraces)),
       m_ownerThread(QThread::currentThread())
 {
@@ -413,7 +413,9 @@ LibraryOperationResult LibraryRepository::open()
     m_database.setDatabaseName(m_databasePath == QStringLiteral(":memory:")
                                    ? m_databasePath
                                    : QFileInfo(m_databasePath).absoluteFilePath());
-    m_database.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
+    m_database.setConnectOptions(m_access == Access::ReadOnly
+        ? QStringLiteral("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=1000")
+        : QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
     if (!m_database.open()) {
         const auto result = failure(LibraryDiagnosticCode::DatabaseError, m_databasePath,
                                     sqlMessage(QStringLiteral("Open database"), m_database.lastError()));
@@ -478,6 +480,9 @@ LibraryOperationResult LibraryRepository::prepareSchema(bool writing)
             QStringLiteral("旧开发数据库需要先备份再重建（当前格式 v%1）；未迁移或清空原数据。").arg(schemaVersion));
     }
     if (!writing && version != schemaVersion) {
+        if (m_access == Access::ReadOnly)
+            return reject(LibraryDiagnosticCode::UnsupportedSchemaVersion,
+                          QStringLiteral("Read-only access requires a current library database."));
         // Creation and additive v4-v7 upgrades release this read snapshot,
         // acquire the writer, then re-read and validate the entire schema.
         // A concurrent opener may already have completed the same operation.

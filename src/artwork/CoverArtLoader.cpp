@@ -234,7 +234,8 @@ CoverArtResult CoverArtLoader::load(const CoverArtRequest &request,
             manualError = QStringLiteral("手动封面作品目录不一致，已使用自动查找。");
             manualPath.clear();
         } else {
-            const auto saved = ManualCoverStore::read(request.manualLookup->settings, request.manualLookup->identity);
+            const auto saved = ManualCoverStore::read(request.manualLookup->settings, request.manualLookup->identity,
+                request.manualLookup->readOnly);
             if (saved.success) {
                 managedChoice = !saved.managedFile.isEmpty();
                 manualPath = managedChoice ? saved.managedFile : saved.relativePath;

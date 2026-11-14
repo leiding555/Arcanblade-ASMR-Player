@@ -1,13 +1,20 @@
 #include "playback/AudioPlayer.h"
+#include "playback/DirectSoundOutputTest.h"
 #include "playback/PlaybackDiagnosticLog.h"
 
 #include <QAudioBuffer>
 #include <QAudioDevice>
 #include <QAudioOutput>
+#include <QBuffer>
+#include <QDataStream>
+#include <QDateTime>
+#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QMediaDevices>
 #include <QMediaMetaData>
 #include <QMetaEnum>
+#include <QPromise>
+#include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
@@ -15,8 +22,11 @@
 #include <QAudioBufferOutput>
 #endif
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <mutex>
+#include <numbers>
 #include <utility>
 
 namespace asmr {
@@ -33,6 +43,41 @@ QJsonObject audioDevice(const QAudioDevice &device)
             {QStringLiteral("id_hex"), QString::fromLatin1(device.id().toHex())},
             {QStringLiteral("name"), device.description()},
             {QStringLiteral("is_default"), device.isDefault()}};
+}
+
+constexpr int outputTestSampleRate = 24000;
+constexpr int outputTestWaveHeaderBytes = 44;
+
+QByteArray outputTestWave(float gain = 1.0f)
+{
+    constexpr quint32 rate = outputTestSampleRate;
+    constexpr quint32 toneFrames = rate / 4;
+    constexpr quint32 secondToneStart = rate / 2;
+    constexpr quint32 fadeFrames = rate / 50;
+    constexpr quint32 frameCount = rate;
+    constexpr quint32 dataSize = frameCount * 4;
+    QByteArray wave;
+    wave.reserve(outputTestWaveHeaderBytes + dataSize);
+    QDataStream out(&wave, QIODevice::WriteOnly);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out.writeRawData("RIFF", 4);
+    out << quint32(36 + dataSize);
+    out.writeRawData("WAVEfmt ", 8);
+    out << quint32(16) << quint16(1) << quint16(2) << rate << quint32(rate * 4)
+        << quint16(4) << quint16(16);
+    out.writeRawData("data", 4);
+    out << dataSize;
+    const auto sample = [gain](quint32 frame) -> qint16 {
+        if (frame >= toneFrames) return 0;
+        const auto fade = std::min({frame, toneFrames - 1 - frame, fadeFrames});
+        const auto phase = 2.0 * std::numbers::pi * 440.0 * frame / rate;
+        return qint16(9600.0 * gain * std::sin(phase) * fade / fadeFrames);
+    };
+    for (quint32 frame = 0; frame < frameCount; ++frame) {
+        const qint16 right = frame >= secondToneStart ? sample(frame - secondToneStart) : 0;
+        out << sample(frame) << right;
+    }
+    return wave;
 }
 }
 
@@ -51,6 +96,7 @@ AudioPlayer::AudioPlayer(QObject *parent)
 {
     m_player->setAudioOutput(m_audioOutput);
     m_audioOutput->setVolume(0.70f);
+    m_outputAvailable = !m_audioOutput->device().isNull();
 
     connect(m_player, &QMediaPlayer::mediaStatusChanged,
             this, &AudioPlayer::mediaStatusChanged);
@@ -62,6 +108,16 @@ AudioPlayer::AudioPlayer(QObject *parent)
             this, &AudioPlayer::positionChanged);
     connect(m_player, &QMediaPlayer::playbackStateChanged,
             this, &AudioPlayer::playbackStateChanged);
+    connect(m_player, &QMediaPlayer::playbackStateChanged,
+            this, &AudioPlayer::outputTestAvailabilityChanged);
+    connect(m_audioOutput, &QAudioOutput::volumeChanged, this, [this](float volume) {
+        if (volume <= 0.0f) stopOutputTest();
+        emit outputTestAvailabilityChanged();
+    });
+    connect(m_audioOutput, &QAudioOutput::mutedChanged, this, [this](bool muted) {
+        if (muted) stopOutputTest();
+        emit outputTestAvailabilityChanged();
+    });
     connect(m_player, &QMediaPlayer::errorOccurred, this,
             [this](QMediaPlayer::Error error, const QString &message) {
         if (error != QMediaPlayer::NoError)
@@ -129,13 +185,15 @@ AudioPlayer::AudioPlayer(QObject *parent)
     auto *devices = new QMediaDevices(this);
     connect(devices, &QMediaDevices::audioOutputsChanged, this, [this] {
         const auto reason = QStringLiteral("audio_outputs_changed");
-        synchronizeDefaultOutput(reason);
+        synchronizeOutput(reason);
         diagnosticSnapshot(reason);
+        emit outputConfigurationChanged();
     });
 }
 
 AudioPlayer::~AudioPlayer()
 {
+    if (m_directSoundCancel) m_directSoundCancel->store(true);
     endDiagnosticSource(QStringLiteral("player_destroyed"));
 }
 
@@ -176,6 +234,7 @@ bool AudioPlayer::isSeekable() const
 
 void AudioPlayer::setLocalFile(const QString &path)
 {
+    stopOutputTest();
     // MainWindow retires the old capture before stopping the old media. Never
     // leave an earlier source's buffer output attached across setSource().
     detachDiagnosticCapture();
@@ -189,7 +248,13 @@ void AudioPlayer::setLocalFile(const QString &path)
 
 void AudioPlayer::play()
 {
-    synchronizeDefaultOutput(QStringLiteral("before_play"));
+    stopOutputTest();
+    synchronizeOutput(QStringLiteral("before_play"));
+    if (!m_preferredOutputId.isEmpty() && !m_outputAvailable) {
+        diagnosticEvent(QStringLiteral("play_blocked"),
+            {{QStringLiteral("reason"), QStringLiteral("preferred_output_unavailable")}});
+        return;
+    }
     diagnosticEvent(QStringLiteral("play_requested"));
     m_player->play();
 }
@@ -204,6 +269,7 @@ void AudioPlayer::togglePlayback()
 
 void AudioPlayer::stop()
 {
+    stopOutputTest();
     diagnosticEvent(QStringLiteral("stop_requested"));
     diagnosticBoundary(QStringLiteral("stop_requested"));
     m_player->stop();
@@ -224,18 +290,176 @@ void AudioPlayer::setVolumePercent(int volume)
     m_audioOutput->setVolume(static_cast<float>(volume) / 100.0f);
 }
 
-void AudioPlayer::synchronizeDefaultOutput(const QString &reason)
+void AudioPlayer::setPreferredOutput(QByteArray id, QString name)
 {
-    const auto defaultDevice = QMediaDevices::defaultAudioOutput();
-    const auto previousDevice = m_audioOutput->device();
-    if (defaultDevice.isNull() || previousDevice.id() == defaultDevice.id()) return;
+    if (id.isEmpty()) name.clear();
+    if (id == m_preferredOutputId && name == m_preferredOutputName) return;
+    m_preferredOutputId = std::move(id);
+    m_preferredOutputName = std::move(name);
+    synchronizeOutput(QStringLiteral("preference_changed"), true);
+}
 
-    m_audioOutput->setDevice(defaultDevice);
-    diagnosticEvent(QStringLiteral("default_output_synchronized"),
-        {{QStringLiteral("reason"), reason},
-         {QStringLiteral("previous_output_device"), audioDevice(previousDevice)},
-         {QStringLiteral("default_output_device"), audioDevice(defaultDevice)},
-         {QStringLiteral("output_device"), audioDevice(m_audioOutput->device())}});
+QString AudioPlayer::currentOutputName() const
+{
+    if (!m_outputAvailable || !m_player->audioOutput()) return {};
+    return m_audioOutput->device().description();
+}
+
+QJsonObject AudioPlayer::outputDiagnostic() const
+{
+    const auto *output = m_player->audioOutput();
+    return {{QStringLiteral("output_mode"), m_preferredOutputId.isEmpty()
+                ? QStringLiteral("system_default") : QStringLiteral("manual")},
+            {QStringLiteral("preferred_output_id_hex"), QString::fromLatin1(m_preferredOutputId.toHex())},
+            {QStringLiteral("preferred_output_name"), m_preferredOutputName},
+            {QStringLiteral("default_output_device"), audioDevice(QMediaDevices::defaultAudioOutput())},
+            {QStringLiteral("output_device"), audioDevice(output && m_outputAvailable ? output->device() : QAudioDevice{})},
+            {QStringLiteral("output_available"), m_outputAvailable},
+            {QStringLiteral("volume"), double(m_audioOutput->volume())},
+            {QStringLiteral("muted"), m_audioOutput->isMuted()},
+            {QStringLiteral("playback_state"), enumName(playbackState())},
+            {QStringLiteral("last_output_change"), m_lastOutputChange},
+            {QStringLiteral("last_directsound_test"), m_lastDirectSoundTest},
+            {QStringLiteral("qt_audio_capture"), m_outputLogCapture.snapshot()}};
+}
+
+void AudioPlayer::synchronizeOutput(const QString &reason, bool preferenceChanged)
+{
+    const bool followsDefault = m_preferredOutputId.isEmpty();
+    const auto defaultDevice = QMediaDevices::defaultAudioOutput();
+    QAudioDevice target = defaultDevice;
+    if (!followsDefault) {
+        const auto devices = QMediaDevices::audioOutputs();
+        const auto match = std::find_if(devices.cbegin(), devices.cend(), [this](const auto &device) {
+            return device.id() == m_preferredOutputId;
+        });
+        target = match == devices.cend() ? QAudioDevice{} : *match;
+    }
+    const bool wasAttached = m_player->audioOutput() == m_audioOutput;
+    const auto previousDevice = wasAttached ? m_audioOutput->device() : QAudioDevice{};
+    const bool available = !target.isNull();
+    const bool changed = available != m_outputAvailable
+        || (available && (!wasAttached || previousDevice.id() != target.id()))
+        || (!available && !followsDefault && wasAttached);
+    if (!changed && !preferenceChanged) return;
+
+    stopOutputTest();
+    m_outputAvailable = available;
+    if (available) {
+        if (m_audioOutput->device().id() != target.id()) m_audioOutput->setDevice(target);
+        if (!wasAttached) m_player->setAudioOutput(m_audioOutput);
+    } else if (!followsDefault) {
+        if (playbackState() == QMediaPlayer::PlayingState) m_player->pause();
+        if (wasAttached) m_player->setAudioOutput(nullptr);
+    } else if (!wasAttached) {
+        // Default mode keeps the normal Qt behavior even before devices appear.
+        m_audioOutput->setDevice(QAudioDevice{});
+        m_player->setAudioOutput(m_audioOutput);
+    }
+    const auto current = available ? m_audioOutput->device() : QAudioDevice{};
+    m_lastOutputChange = {
+        {QStringLiteral("utc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("reason"), reason},
+        {QStringLiteral("result"), available ? QStringLiteral("selected") : QStringLiteral("unavailable")},
+        {QStringLiteral("previous_output_device"), audioDevice(previousDevice)},
+        {QStringLiteral("default_output_device"), audioDevice(defaultDevice)},
+        {QStringLiteral("output_device"), audioDevice(current)}};
+    diagnosticEvent(followsDefault ? QStringLiteral("default_output_synchronized")
+                                  : QStringLiteral("manual_output_synchronized"), m_lastOutputChange);
+    if (reason != QStringLiteral("audio_outputs_changed")) emit outputConfigurationChanged();
+}
+
+bool AudioPlayer::canTestOutput() const
+{
+    return m_outputAvailable && m_player->audioOutput() == m_audioOutput
+        && playbackState() != QMediaPlayer::PlayingState
+        && !m_audioOutput->isMuted() && m_audioOutput->volume() > 0.0f;
+}
+
+void AudioPlayer::startOutputTest()
+{
+    synchronizeOutput(QStringLiteral("before_output_test"));
+    if (!canTestOutput() || outputTestRunning()) return;
+
+    auto *player = new QMediaPlayer(this);
+    player->setObjectName(QStringLiteral("outputTestPlayer"));
+    auto *output = new QAudioOutput(m_audioOutput->device(), player);
+    output->setVolume(std::min(m_audioOutput->volume(), 0.25f));
+    player->setAudioOutput(output);
+    auto *wave = new QBuffer(player);
+    wave->setData(outputTestWave());
+    wave->open(QIODevice::ReadOnly);
+    m_outputTestPlayer = player;
+    connect(player, &QMediaPlayer::mediaStatusChanged, player, [this, player](auto status) {
+        if (player == m_outputTestPlayer && status == QMediaPlayer::EndOfMedia)
+            finishOutputTest(QStringLiteral("测试播放结束，请以实际听到的声音为准。"));
+    }, Qt::QueuedConnection);
+    connect(player, &QMediaPlayer::errorOccurred, player, [this, player](auto error, const QString &message) {
+        if (player == m_outputTestPlayer && error != QMediaPlayer::NoError)
+            finishOutputTest(QStringLiteral("测试声音失败：%1").arg(message));
+    }, Qt::QueuedConnection);
+    QTimer::singleShot(5000, player, [this, player] {
+        if (player == m_outputTestPlayer) finishOutputTest(QStringLiteral("测试声音超时。"));
+    });
+    player->setSourceDevice(wave, QUrl(QStringLiteral("output-test.wav")));
+    player->play();
+    emit outputTestAvailabilityChanged();
+}
+
+void AudioPlayer::stopOutputTest()
+{
+    if (m_directSoundCancel) m_directSoundCancel->store(true);
+    finishOutputTest({});
+}
+
+void AudioPlayer::startDirectSoundTest(quintptr window)
+{
+    synchronizeOutput(QStringLiteral("before_directsound_test"));
+    if (!canTestOutput() || outputTestRunning()) return;
+    const auto device = m_audioOutput->device();
+    const float gain = std::min(m_audioOutput->volume(), 0.25f);
+    const auto cancelled = std::make_shared<std::atomic_bool>(false);
+    m_directSoundCancel = cancelled;
+    m_lastDirectSoundTest = {{QStringLiteral("started_utc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+                             {QStringLiteral("device"), audioDevice(device)},
+                             {QStringLiteral("stage"), QStringLiteral("running")}};
+    auto promise = std::make_shared<QPromise<DirectSoundTestResult>>();
+    auto *watcher = new QFutureWatcher<DirectSoundTestResult>(this);
+    connect(watcher, &QFutureWatcher<DirectSoundTestResult>::finished, this, [this, watcher, cancelled] {
+        const auto result = watcher->result();
+        watcher->deleteLater();
+        m_directSoundCancel.reset();
+        const auto stage = cancelled->load() ? QStringLiteral("cancelled") : result.stage;
+        m_lastDirectSoundTest.insert(QStringLiteral("finished_utc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+        m_lastDirectSoundTest.insert(QStringLiteral("stage"), stage);
+        const auto code = QStringLiteral("0x%1").arg(result.status, 8, 16, QChar('0'));
+        m_lastDirectSoundTest.insert(QStringLiteral("hresult"), code);
+        if (stage == QStringLiteral("cancelled"))
+            emit outputTestFinished({});
+        else if (result.status)
+            emit outputTestFinished(QStringLiteral("DS 测试失败（%1，%2）。").arg(stage, code));
+        else
+            emit outputTestFinished(QStringLiteral("DS 测试播放结束，请以实际听到的声音为准。"));
+        emit outputTestAvailabilityChanged();
+    });
+    watcher->setFuture(promise->future());
+    QThreadPool::globalInstance()->start([promise, cancelled, id = device.id(), window, gain] {
+        promise->start();
+        const auto pcm = outputTestWave(gain).mid(outputTestWaveHeaderBytes);
+        promise->addResult(testDirectSoundOutput(id, window, pcm, outputTestSampleRate, *cancelled));
+        promise->finish();
+    });
+    emit outputTestAvailabilityChanged();
+}
+
+void AudioPlayer::finishOutputTest(const QString &status)
+{
+    auto *player = std::exchange(m_outputTestPlayer, nullptr);
+    if (!player) return;
+    player->stop();
+    player->deleteLater();
+    emit outputTestFinished(status);
+    emit outputTestAvailabilityChanged();
 }
 
 void AudioPlayer::setDiagnosticLog(PlaybackDiagnosticLog *log)

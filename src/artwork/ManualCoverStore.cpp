@@ -52,10 +52,11 @@ QString ManualCoverStore::normalizeRelativePath(const QString &input)
 }
 
 ManualCoverStoreResult ManualCoverStore::read(
-    const ManualCoverSettings &settings, const ManualCoverIdentity &identity)
+    const ManualCoverSettings &settings, const ManualCoverIdentity &identity, bool readOnly)
 {
     if (!valid(identity)) return failure(QStringLiteral("手动封面作品标识无效。"));
-    LibraryRepository repository(settings.databasePath);
+    LibraryRepository repository(settings.databasePath, readOnly
+        ? LibraryRepository::Access::ReadOnly : LibraryRepository::Access::ReadWrite);
     const auto opened = repository.open();
     if (!opened.success) return converted(opened);
     const auto result = repository.workArtwork(work(identity));

@@ -22,6 +22,7 @@ struct ManualCoverIdentity {
 struct ManualCoverLookup {
     ManualCoverSettings settings;
     ManualCoverIdentity identity;
+    bool readOnly = false;
 };
 
 struct ManualCoverStoreResult {
@@ -36,7 +37,7 @@ struct ManualCoverStoreResult {
 class ManualCoverStore final {
 public:
     [[nodiscard]] static ManualCoverStoreResult read(
-        const ManualCoverSettings &settings, const ManualCoverIdentity &identity);
+        const ManualCoverSettings &settings, const ManualCoverIdentity &identity, bool readOnly = false);
     [[nodiscard]] static ManualCoverStoreResult write(
         const ManualCoverSettings &settings, const ManualCoverIdentity &identity,
         const QString &relativePath);

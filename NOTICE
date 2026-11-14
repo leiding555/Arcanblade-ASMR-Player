@@ -63,6 +63,16 @@ Arcanblade 的原创代码及原创图标采用 MIT 许可证，详见根目录 
 
 其他运行时依赖
 
+局域网手机播放使用 cpp-httplib v0.66.0 单头文件库，适用 MIT 许可证。
+固定上游提交：cdcd2ac6e6d5548b5a9130fb39ab76d2c6c614b0
+上游来源：https://github.com/yhirose/cpp-httplib/releases/tag/v0.66.0
+完整许可位于 src/third_party/cpp-httplib/LICENSE，发行包位于 licenses/cpp-httplib-MIT.txt。
+
+手机扫码配对使用 Project Nayuki QR Code generator v1.8.0（MIT）。
+上游修订：720f62bddb7226106071d4728c292cb1df519ceb
+上游来源：https://github.com/nayuki/QR-Code-generator/releases/tag/v1.8.0
+完整许可位于 src/third_party/qrcodegen/LICENSE，发行包位于 licenses/qrcodegen-MIT.txt。
+
 随播放器提供 7-Zip Extra 26.06 的未修改 x64 独立命令行工具 7za.exe，
 用于 Faster-Whisper-XXL 归档检查和解压；Copyright (C) 1999-2026 Igor Pavlov。
 适用 GNU LGPL 2.1 或更新版本，以及包内所列 BSD 许可。对应许可全文、

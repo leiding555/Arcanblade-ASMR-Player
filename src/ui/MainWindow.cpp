@@ -1,5 +1,8 @@
 #include "ui/MainWindow.h"
 #include "ui/ApplicationBrand.h"
+#include "ui/DialogFrame.h"
+#include "ui/MobilePlaybackDialog.h"
+#include "mobile/MobilePlaybackService.h"
 #include "ui/PlayerMessageBox.h"
 #include "ui/UpdateNotificationController.h"
 #include "update/ApplicationVersion.h"
@@ -36,6 +39,9 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QAudioDevice>
+#include <QClipboard>
+#include <QComboBox>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QCloseEvent>
@@ -45,8 +51,10 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QJsonDocument>
 #include <QLabel>
 #include <QHBoxLayout>
+#include <QMediaDevices>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QMenu>
@@ -59,6 +67,8 @@
 #include <QSignalBlocker>
 #include <QStringList>
 #include <QStyle>
+#include <QStyleOptionComboBox>
+#include <QStylePainter>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
@@ -82,6 +92,70 @@
 
 namespace asmr {
 namespace {
+
+class AudioDeviceSettingsDialog final : public QDialog
+{
+public:
+    explicit AudioDeviceSettingsDialog(QWidget *parent) : QDialog(parent) {}
+
+    void setContent(QVBoxLayout *layout)
+    {
+        setMinimumWidth(480);
+        m_frame = new DialogFrame(this, layout, false);
+    }
+
+    void fitContentHeight()
+    {
+        if (!m_frame || !isVisible()) return;
+        auto *body = m_frame->contentWidget();
+        auto *bodyLayout = body->layout();
+        const auto margins = layout()->contentsMargins();
+        const int bodyWidth = width() - margins.left() - margins.right();
+        const int bodyHeight = std::max(bodyLayout->totalMinimumSize().height(),
+                                        bodyLayout->totalHeightForWidth(bodyWidth));
+        const int decoration = m_frame->titleBar()->height() + margins.top() + margins.bottom();
+        const int available = screen() ? screen()->availableGeometry().height() - 32 : height();
+        const int targetHeight = std::min(bodyHeight + decoration, std::max(1, available));
+        body->setMinimumHeight(bodyHeight);
+        setMinimumHeight(targetHeight);
+        resize(width(), targetHeight);
+    }
+
+protected:
+    void showEvent(QShowEvent *event) override
+    {
+        QDialog::showEvent(event);
+        fitContentHeight();
+    }
+
+    bool nativeEvent(const QByteArray &type, void *message, qintptr *result) override
+    {
+        return m_frame && m_frame->handleNativeEvent(type, message, result)
+            ? true : QDialog::nativeEvent(type, message, result);
+    }
+
+private:
+    DialogFrame *m_frame = nullptr;
+};
+
+class AudioOutputDeviceCombo final : public QComboBox
+{
+public:
+    using QComboBox::QComboBox;
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QStylePainter painter(this);
+        QStyleOptionComboBox option;
+        initStyleOption(&option);
+        const auto field = style()->subControlRect(QStyle::CC_ComboBox, &option,
+                                                   QStyle::SC_ComboBoxEditField, this);
+        option.currentText = fontMetrics().elidedText(option.currentText, Qt::ElideRight, field.width());
+        painter.drawComplexControl(QStyle::CC_ComboBox, option);
+        painter.drawControl(QStyle::CE_ComboBoxLabel, option);
+    }
+};
 
 // Observe only geometry changes, independently of playback's application-wide
 // key filter. Coalescing lets splitter/layout events settle before mapping the
@@ -172,6 +246,9 @@ MainWindow::MainWindow(const QString &libraryDatabasePath, QWidget *parent)
     }
     resize(initialSize);
     m_settings.setFallbacksEnabled(false);
+    m_audioPlayer->setPreferredOutput(
+        m_settings.value(QStringLiteral("audioOutput/deviceId")).toByteArray(),
+        m_settings.value(QStringLiteral("audioOutput/deviceName")).toString());
     const auto saved = readFloatingSubtitleSettings(m_settings);
     // Choose the saved width and monitor before applying its height limit.
     m_floatingSubtitleWindow->restoreSize(saved.size);
@@ -179,6 +256,12 @@ MainWindow::MainWindow(const QString &libraryDatabasePath, QWidget *parent)
     m_floatingSubtitleWindow->setAppearance(saved.appearance);
     m_floatingSubtitleWindow->restorePosition(saved.position);
     createUi();
+    auto *deviceSettings = m_libraryPanel->settingsMenu()->addAction(QStringLiteral("设备设置…"));
+    deviceSettings->setObjectName(QStringLiteral("audioDeviceSettingsAction"));
+    connect(deviceSettings, &QAction::triggered, this, &MainWindow::showAudioDeviceSettings);
+    auto *mobilePlayback = m_libraryPanel->settingsMenu()->addAction(QStringLiteral("手机播放…"));
+    mobilePlayback->setObjectName(QStringLiteral("mobilePlaybackAction"));
+    connect(mobilePlayback, &QAction::triggered, this, &MainWindow::showMobilePlayback);
     createSystemTray();
     connectSignals();
     configureTabOrder();
@@ -293,6 +376,7 @@ void MainWindow::restartForUpdate(const UpdateDownloadResult &result)
 // The unique_ptr still destroys the window with MainWindow, including while visible.
 MainWindow::~MainWindow()
 {
+    if (m_mobilePlayback) m_mobilePlayback->stop();
     m_audioPlayer->endDiagnosticSource(QStringLiteral("window_destroyed"));
     if (m_playbackDiagnosticLog) m_playbackDiagnosticLog->shutdown();
     if (m_categoryMutationCancelled) m_categoryMutationCancelled->store(true);
@@ -1302,6 +1386,7 @@ void MainWindow::startSubtitleBadgeQuery()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     if (m_closing && !m_updateInstallPreparing
+        && (!m_mobilePlayback || m_mobilePlayback->isIdle())
         && (!m_updateNotifications || m_updateNotifications->isShutdownFinished())
         && m_libraryShutdownFinished && m_batchShutdownFinished && m_rootShutdownFinished
         && !m_libraryQueryInProgress && !m_categoryMutationInProgress && !m_subtitleBadgeQueryInProgress && m_workFolderWorkers == 0
@@ -1325,6 +1410,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
         return;
     finishPlaybackProgressForClose();
     m_closing = true;
+    if (m_mobilePlaybackDialog) m_mobilePlaybackDialog->hide();
+    if (m_mobilePlayback) m_mobilePlayback->stop();
     if (m_categoryMutationCancelled) m_categoryMutationCancelled->store(true);
     if (m_categoryNameDialog) {
         m_categoryNameDialog->hide();
@@ -1391,6 +1478,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
         m_subtitleErrorDialog->hide();
     m_subtitlePanel->setImportEnabled(false);
     m_libraryPanel->settingsMenu()->setEnabled(false);
+    if (m_audioDeviceSettingsDialog) m_audioDeviceSettingsDialog->reject();
     m_floatingAppearanceDialog->hide();
     m_toggleFloatingAction->setEnabled(false);
     m_lockFloatingAction->setEnabled(false);
@@ -1413,6 +1501,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::finishCloseIfReady()
 {
     if (!m_closing || m_updateInstallPreparing
+        || (m_mobilePlayback && !m_mobilePlayback->isIdle())
         || (m_updateNotifications && !m_updateNotifications->isShutdownFinished())
         || !m_libraryShutdownFinished || !m_batchShutdownFinished || !m_rootShutdownFinished || m_libraryQueryInProgress
         || m_categoryMutationInProgress || m_subtitleBadgeQueryInProgress || m_workFolderWorkers > 0
@@ -1434,6 +1523,203 @@ void MainWindow::finishCloseIfReady()
         return;
     m_closeScheduled = true;
     QMetaObject::invokeMethod(this, [this]() { close(); }, Qt::QueuedConnection);
+}
+
+void MainWindow::showMobilePlayback()
+{
+    if (m_closing) return;
+    if (!m_mobilePlayback) {
+        m_mobilePlayback = new MobilePlaybackService(m_manualCoverSettings, this);
+        connect(m_mobilePlayback, &MobilePlaybackService::changed, this, &MainWindow::finishCloseIfReady);
+        m_mobilePlaybackDialog = new MobilePlaybackDialog(m_mobilePlayback, this);
+    }
+    m_mobilePlaybackDialog->refreshInterfaces();
+    m_mobilePlaybackDialog->show();
+    m_mobilePlaybackDialog->raise();
+    m_mobilePlaybackDialog->activateWindow();
+}
+
+void MainWindow::showAudioDeviceSettings()
+{
+    if (m_closing) return;
+    if (!m_audioDeviceSettingsDialog) {
+        auto *dialog = new AudioDeviceSettingsDialog(this);
+        m_audioDeviceSettingsDialog = dialog;
+        dialog->setObjectName(QStringLiteral("audioDeviceSettingsDialog"));
+        dialog->setWindowTitle(QStringLiteral("设备设置"));
+        auto *devices = new AudioOutputDeviceCombo(dialog);
+        devices->setObjectName(QStringLiteral("audioOutputDeviceCombo"));
+        devices->setMinimumContentsLength(24);
+        devices->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        auto *deviceLabel = new QLabel(QStringLiteral("输出设备"), dialog);
+        deviceLabel->setBuddy(devices);
+        auto *test = new QPushButton(QStringLiteral("测试 WASAPI"), dialog);
+        test->setObjectName(QStringLiteral("testAudioOutputButton"));
+        auto *testDs = new QPushButton(QStringLiteral("测试 DS"), dialog);
+        testDs->setObjectName(QStringLiteral("testDirectSoundOutputButton"));
+#ifndef Q_OS_WIN
+        testDs->hide();
+#endif
+        auto *current = new QLabel(dialog);
+        current->setObjectName(QStringLiteral("currentAudioOutputLabel"));
+        auto *status = new QLabel(dialog);
+        status->setObjectName(QStringLiteral("audioDeviceSettingsStatus"));
+        for (auto *label : {current, status}) {
+            label->setTextFormat(Qt::PlainText);
+            label->setWordWrap(true);
+            auto policy = label->sizePolicy();
+            policy.setHorizontalPolicy(QSizePolicy::Ignored);
+            label->setSizePolicy(policy);
+        }
+        status->setMinimumHeight(status->fontMetrics().lineSpacing());
+        auto *copy = new QPushButton(QStringLiteral("复制音频诊断"), dialog);
+        copy->setObjectName(QStringLiteral("copyAudioOutputDiagnosticButton"));
+        auto *capture = new QPushButton(QStringLiteral("开始采集"), dialog);
+        capture->setObjectName(QStringLiteral("captureQtAudioLogButton"));
+        auto *captureTimer = new QTimer(dialog);
+        captureTimer->setSingleShot(true);
+        auto *close = new QPushButton(QStringLiteral("关闭"), dialog);
+        close->setObjectName(QStringLiteral("closeAudioDeviceSettingsButton"));
+        close->setAutoDefault(false);
+        for (auto *button : {test, testDs, copy, capture}) button->setAutoDefault(false);
+
+        auto *outputRow = new QHBoxLayout;
+        outputRow->addWidget(deviceLabel);
+        outputRow->addWidget(devices, 1);
+        auto *testRow = new QHBoxLayout;
+        testRow->addWidget(test);
+        testRow->addWidget(testDs);
+        testRow->addStretch();
+        auto *actions = new QHBoxLayout;
+        actions->addWidget(capture);
+        actions->addWidget(copy);
+        actions->addStretch();
+        actions->addWidget(close);
+        auto *layout = new QVBoxLayout;
+        layout->setContentsMargins(20, 16, 20, 16);
+        layout->setSpacing(10);
+        layout->addLayout(outputRow);
+        layout->addWidget(current);
+        layout->addLayout(testRow);
+        layout->addWidget(status);
+        layout->addLayout(actions);
+        dialog->setContent(layout);
+
+        const auto setStatus = [dialog, status](const QString &text) {
+            status->setText(text);
+            dialog->fitContentHeight();
+        };
+        const auto refreshTest = [this, test, testDs] {
+            const bool running = m_audioPlayer->outputTestRunning();
+            const bool dsRunning = m_audioPlayer->directSoundTestRunning();
+            const bool canStart = !running && m_audioPlayer->canTestOutput();
+            test->setText(running && !dsRunning ? QStringLiteral("停止 WASAPI") : QStringLiteral("测试 WASAPI"));
+            testDs->setText(dsRunning ? QStringLiteral("停止 DS") : QStringLiteral("测试 DS"));
+            test->setEnabled(canStart || (running && !dsRunning));
+            testDs->setEnabled(canStart || dsRunning);
+            test->setToolTip(QStringLiteral("暂停或停止播放并开启音量后，依次试听左右声道。"));
+            testDs->setToolTip(test->toolTip());
+        };
+        const auto refreshDevices = [this, dialog, devices, current, refreshTest] {
+            constexpr int nameRole = Qt::UserRole + 1;
+            devices->clear();
+            devices->addItem(QStringLiteral("跟随系统默认"), QByteArray{});
+            const auto outputs = QMediaDevices::audioOutputs();
+            for (const auto &device : outputs) {
+                devices->addItem(device.description(), device.id());
+                devices->setItemData(devices->count() - 1, device.description(), nameRole);
+            }
+            const auto &id = m_audioPlayer->preferredOutputId();
+            int index = devices->findData(id);
+            if (!id.isEmpty() && index < 0) {
+                const auto &name = m_audioPlayer->preferredOutputName();
+                devices->addItem(name.isEmpty() ? QStringLiteral("所选设备（不可用）")
+                                                : QStringLiteral("%1（不可用）").arg(name), id);
+                index = devices->count() - 1;
+                devices->setItemData(index, name, nameRole);
+            }
+            devices->setCurrentIndex(index < 0 ? 0 : index);
+            devices->setToolTip(devices->currentText());
+            const auto outputName = m_audioPlayer->currentOutputName();
+            if (!outputName.isEmpty())
+                current->setText(QStringLiteral("当前输出：%1").arg(outputName));
+            else if (!id.isEmpty())
+                current->setText(QStringLiteral("所选设备不可用。请重新连接或改选设备，再继续播放。"));
+            else
+                current->setText(QStringLiteral("当前没有可用的默认输出设备。"));
+            refreshTest();
+            dialog->fitContentHeight();
+        };
+        connect(m_audioPlayer, &AudioPlayer::outputConfigurationChanged, dialog, refreshDevices);
+        connect(m_audioPlayer, &AudioPlayer::outputTestAvailabilityChanged, dialog, refreshTest);
+        connect(m_audioPlayer, &AudioPlayer::outputTestFinished, dialog, setStatus);
+        connect(devices, &QComboBox::activated, dialog, [this, devices, setStatus](int index) {
+            const auto id = devices->itemData(index).toByteArray();
+            const auto name = devices->itemData(index, Qt::UserRole + 1).toString();
+            m_audioPlayer->setPreferredOutput(id, name);
+            m_settings.setValue(QStringLiteral("audioOutput/deviceId"), id);
+            m_settings.setValue(QStringLiteral("audioOutput/deviceName"), name);
+            m_settings.sync();
+            setStatus(m_settings.status() == QSettings::NoError
+                ? QString{} : QStringLiteral("设备已切换，无法保存输出偏好。"));
+        });
+        connect(test, &QPushButton::clicked, dialog, [this, setStatus] {
+            if (m_audioPlayer->outputTestRunning()) {
+                m_audioPlayer->stopOutputTest();
+                return;
+            }
+            m_audioPlayer->startOutputTest();
+            if (m_audioPlayer->outputTestRunning())
+                setStatus(QStringLiteral("正在通过 WASAPI 测试左、右声道…"));
+        });
+        connect(testDs, &QPushButton::clicked, dialog, [this, dialog, setStatus] {
+            if (m_audioPlayer->directSoundTestRunning()) {
+                m_audioPlayer->stopOutputTest();
+                return;
+            }
+            m_audioPlayer->startDirectSoundTest(quintptr(dialog->winId()));
+            if (m_audioPlayer->directSoundTestRunning())
+                setStatus(QStringLiteral("正在通过 DS 测试左、右声道…"));
+        });
+        const auto stopCapture = [this, capture, captureTimer] {
+            m_audioPlayer->outputLogCapture().stop();
+            captureTimer->stop();
+            capture->setText(QStringLiteral("开始采集"));
+        };
+        connect(capture, &QPushButton::clicked, dialog, [this, capture, captureTimer, setStatus, stopCapture] {
+            auto &log = m_audioPlayer->outputLogCapture();
+            if (log.isActive()) {
+                stopCapture();
+                setStatus(QStringLiteral("已停止采集，可复制音频诊断。"));
+            } else if (log.start()) {
+                capture->setText(QStringLiteral("停止采集"));
+                captureTimer->start(60'000);
+                setStatus(QStringLiteral("正在采集 Qt 音频警告，请复现问题后复制诊断。"));
+            } else {
+                setStatus(QStringLiteral("已有音频诊断采集正在进行。"));
+            }
+        });
+        connect(captureTimer, &QTimer::timeout, dialog, [stopCapture, setStatus] {
+            stopCapture();
+            setStatus(QStringLiteral("采集时间已到，可复制音频诊断。"));
+        });
+        connect(copy, &QPushButton::clicked, dialog, [this, setStatus, stopCapture] {
+            stopCapture();
+            auto diagnostic = m_audioPlayer->outputDiagnostic();
+            diagnostic.insert(QStringLiteral("app_version"), applicationBuildVersion());
+            const auto text = QJsonDocument(diagnostic).toJson(QJsonDocument::Indented);
+            QGuiApplication::clipboard()->setText(QString::fromUtf8(text));
+            setStatus(QStringLiteral("音频诊断已复制。"));
+        });
+        connect(close, &QPushButton::clicked, dialog, &QDialog::reject);
+        connect(dialog, &QDialog::finished, m_audioPlayer, &AudioPlayer::stopOutputTest);
+        connect(dialog, &QDialog::finished, dialog, stopCapture);
+        connect(dialog, &QDialog::finished, status, &QLabel::clear);
+        refreshDevices();
+    }
+    m_audioDeviceSettingsDialog->show();
+    m_audioDeviceSettingsDialog->raise();
+    m_audioDeviceSettingsDialog->activateWindow();
 }
 
 void MainWindow::showFloatingSubtitleAppearance()

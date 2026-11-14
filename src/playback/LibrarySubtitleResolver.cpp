@@ -186,6 +186,15 @@ LibrarySubtitleResolution resolveLibrarySubtitles(const QString &databasePath,
         result.snapshot.success = false;
         result.snapshot.diagnostics += closed.diagnostics;
     }
+    auto selected = selectLibrarySubtitles(std::move(result.snapshot));
+    selected.pruned = result.pruned;
+    return selected;
+}
+
+LibrarySubtitleResolution selectLibrarySubtitles(LibraryTrackSubtitlesResult snapshotResult)
+{
+    LibrarySubtitleResolution result;
+    result.snapshot = std::move(snapshotResult);
     if (!result.snapshot.success) {
         for (const auto &diagnostic : result.snapshot.diagnostics)
             result.issues.push_back({LibrarySubtitleIssueCode::Database, 0,
@@ -193,6 +202,8 @@ LibrarySubtitleResolution resolveLibrarySubtitles(const QString &databasePath,
         return result;
     }
     const auto &snapshot = result.snapshot;
+    const auto workId = snapshot.work.id;
+    const auto audioFileId = snapshot.audio.id;
     if (snapshot.audio.missing) {
         result.issues.push_back({LibrarySubtitleIssueCode::Missing, 0, snapshot.audio.relativePath,
                                  QStringLiteral("当前音轨已标记缺失，未自动选择字幕。")});

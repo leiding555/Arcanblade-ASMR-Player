@@ -260,9 +260,14 @@ set(_audio_file_validation_sources
 target_sources(AsmrAiSubtitle PRIVATE ${_audio_file_validation_sources})
 add_library(AsmrPlaybackDiagnostics STATIC
     src/playback/PlaybackDiagnosticLog.h src/playback/PlaybackDiagnosticLog.cpp
+    src/playback/QtAudioLogCapture.h src/playback/QtAudioLogCapture.cpp
+    src/playback/DirectSoundOutputTest.h src/playback/DirectSoundOutputTest.cpp
     src/playback/PcmDiagnosticSummary.h src/playback/PcmDiagnosticSummary.cpp)
 target_include_directories(AsmrPlaybackDiagnostics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(AsmrPlaybackDiagnostics PUBLIC Qt6::Core Qt6::Multimedia)
+if(WIN32)
+    target_link_libraries(AsmrPlaybackDiagnostics PRIVATE dsound ole32)
+endif()
 if(MSVC)
     target_compile_options(AsmrPlaybackDiagnostics PRIVATE /W4 /utf-8)
 else()
@@ -407,6 +412,34 @@ else()
     target_compile_options(AsmrUpdateUi PRIVATE -Wall -Wextra)
 endif()
 
+add_library(AsmrMobilePlayback STATIC
+    src/mobile/MobileOfflineZip.h
+    src/mobile/MobileOfflineZip.cpp
+    src/mobile/MobilePlaybackService.h
+    src/mobile/MobilePlaybackService.cpp
+    src/ui/MobilePlaybackDialog.h
+    src/ui/MobilePlaybackDialog.cpp
+    src/third_party/qrcodegen/qrcodegen.cpp
+    src/playback/AudioFileValidation.cpp
+    src/playback/LibrarySubtitleResolver.cpp
+)
+target_include_directories(AsmrMobilePlayback PUBLIC src)
+target_include_directories(AsmrMobilePlayback SYSTEM PRIVATE src/third_party/cpp-httplib src/third_party/qrcodegen)
+target_link_libraries(AsmrMobilePlayback PUBLIC Qt6::Network
+    PRIVATE AsmrLibrary AsmrArtwork AsmrWindowFrame)
+qt_add_resources(AsmrMobilePlayback mobile_playback PREFIX "/mobile-playback"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/mobile-playback"
+    FILES resources/mobile-playback/index.html resources/mobile-playback/player.css
+          resources/mobile-playback/player.js resources/mobile-playback/offline-transfer-sender.js)
+qt_add_resources(AsmrMobilePlayback mobile_playback_branding PREFIX "/mobile-playback"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding"
+    FILES resources/branding/arcanblade-mark-256.png)
+if(MSVC)
+    target_compile_options(AsmrMobilePlayback PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(AsmrMobilePlayback PRIVATE -Wall -Wextra)
+endif()
+
 add_library(AsmrTranslationApi STATIC
     src/ai/TranslationApiSettings.h src/ai/TranslationApiSettings.cpp
     src/ai/ApiKeyStore.h src/ai/ApiKeyStore.cpp
@@ -478,6 +511,7 @@ endif()
 
 target_link_libraries(AsmrPlayer PRIVATE
     AsmrPlaybackDiagnostics
+    AsmrMobilePlayback
     AsmrUpdateUi
     AsmrTranslationSettingsUi
     AsmrChickenRice

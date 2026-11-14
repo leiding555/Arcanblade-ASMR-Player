@@ -60,6 +60,7 @@ inline bool librarySubtitleNewer(const LibrarySubtitleOrderKey &left, const Libr
 LibrarySubtitlePathResult validateLibrarySubtitlePath(const QString &root, const LibraryFile &file);
 LibrarySubtitleResolution resolveLibrarySubtitles(const QString &databasePath,
                                                  qint64 workId, qint64 audioFileId);
+LibrarySubtitleResolution selectLibrarySubtitles(LibraryTrackSubtitlesResult snapshot);
 // Recheck containment/readability immediately before and after the existing loader.
 SubtitleFileLoadResult loadLibrarySubtitle(const QString &root, const LibraryFile &file);
 

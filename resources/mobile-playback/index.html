@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#151a1d">
+  <title>Arcanblade 手机播放</title>
+  <link rel="icon" href="mark.png">
+  <link rel="stylesheet" href="player.css">
+  <script src="offline-transfer-sender.js" defer></script>
+  <script src="player.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <button id="tracks-button" type="button" hidden>返回</button>
+    <span class="site-brand">
+      <img src="mark.png" alt="" width="32" height="32">
+      <strong>Arcanblade</strong>
+    </span>
+    <a id="install-app" href="https://leiding555.github.io/Arcanblade-offline/" target="_blank" rel="noopener noreferrer" hidden>离线库</a>
+  </header>
+  <main>
+    <p id="connection" role="status"></p>
+    <div id="package-transfer" hidden>
+      <p id="package-transfer-status" role="status"></p>
+      <button id="cancel-package-transfer" type="button" hidden>取消导出</button>
+    </div>
+    <section id="pairing" hidden>
+      <h1>连接电脑</h1>
+      <form id="pair-form">
+        <label for="code">电脑端显示的六位配对码</label>
+        <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+        <button type="submit">连接</button>
+      </form>
+    </section>
+    <section id="library" hidden>
+      <div class="heading">
+        <h1>作品库</h1>
+        <div class="library-actions">
+          <button id="batch-open" type="button" disabled>导出到离线库</button>
+          <button id="refresh">刷新</button>
+        </div>
+      </div>
+      <div id="works"></div>
+    </section>
+    <section id="export" hidden>
+      <h1>导出到离线库</h1>
+      <div id="export-works"></div>
+      <div class="export-actions">
+        <span id="export-size" aria-live="polite"></span>
+        <button id="package-export" type="button" disabled>开始导出</button>
+      </div>
+    </section>
+    <section id="work" hidden>
+      <div class="heading"><h1 id="work-name"></h1><button id="package-open" type="button" hidden>下载离线包</button></div>
+      <form id="package-form" method="post" hidden>
+        <div class="heading">
+          <label><input id="package-all" type="checkbox"> 全选</label>
+          <span id="package-size" aria-live="polite"></span>
+        </div>
+        <div id="package-tracks"></div>
+        <input id="package-selection" type="hidden" name="tracks">
+        <div class="package-actions">
+          <button id="package-submit" type="submit">下载压缩包</button>
+          <button id="package-close" type="button">取消</button>
+        </div>
+      </form>
+      <p id="package-help" hidden>下载完成后，从离线库的「导入离线包」选择下载的文件。</p>
+      <a id="hosted-library" href="https://leiding555.github.io/Arcanblade-offline/" target="_blank" rel="noopener noreferrer" hidden>打开离线库</a>
+      <ul id="tracks"></ul>
+    </section>
+    <section id="offline" hidden>
+      <div class="heading">
+        <h1 id="offline-heading">离线库</h1>
+        <div class="offline-actions">
+          <label id="import-packs" class="file-picker" for="pack-files" hidden>
+            导入离线包
+            <input id="pack-files" type="file" multiple accept=".zip,application/zip">
+          </label>
+          <button id="cancel-import" type="button" hidden>取消导入</button>
+        </div>
+      </div>
+      <section id="install-help" aria-labelledby="install-heading" hidden>
+        <h2 id="install-heading">添加离线库到桌面</h2>
+        <p id="install-steps"></p>
+        <button id="install-offline" type="button" hidden>添加到桌面</button>
+      </section>
+      <p id="import-status" role="status"></p>
+      <p id="offline-usage"></p>
+      <div id="offline-works"></div>
+      <ul id="offline-tracks"></ul>
+    </section>
+    <section id="player" hidden>
+      <div class="now-playing">
+        <img id="cover" src="mark.png" alt="" width="56" height="56">
+        <div class="track-info">
+          <p id="playing-work"></p>
+          <h1 id="playing-track"></h1>
+        </div>
+      </div>
+      <section id="subtitles" aria-labelledby="subtitle-heading" hidden>
+        <div class="subtitle-heading">
+          <h2 id="subtitle-heading">字幕</h2>
+          <div class="subtitle-actions">
+            <button id="subtitle-pip" type="button" aria-pressed="false" aria-describedby="subtitle-pip-status" disabled>字幕画中画</button>
+            <button id="resume-subtitles" type="button" hidden>回到当前字幕</button>
+          </div>
+        </div>
+        <div id="subtitle-scroll" tabindex="0" role="region" aria-labelledby="subtitle-heading">
+          <ol id="subtitle-cues"></ol>
+        </div>
+      </section>
+      <footer class="player-controls">
+        <p id="subtitle-pip-status" role="status"></p>
+        <p id="playback-status" role="status"></p>
+        <audio id="audio" controls preload="metadata"></audio>
+        <div class="track-controls">
+          <button id="previous" type="button">上一首</button>
+          <button id="next" type="button">下一首</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+</body>
+</html>

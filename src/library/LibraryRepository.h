@@ -208,7 +208,8 @@ struct LibraryPlaybackProgressWriteResult : LibraryOperationResult {
 // or query object is exposed to callers.
 class LibraryRepository final {
 public:
-    explicit LibraryRepository(QString databasePath);
+    enum class Access { ReadWrite, ReadOnly };
+    explicit LibraryRepository(QString databasePath, Access access = Access::ReadWrite);
     ~LibraryRepository();
 
     LibraryRepository(const LibraryRepository &) = delete;
@@ -375,6 +376,7 @@ private:
     void releaseConnection();
 
     QString m_databasePath;
+    const Access m_access;
     QString m_connectionName;
     QThread *m_ownerThread = nullptr;
     QSqlDatabase m_database;

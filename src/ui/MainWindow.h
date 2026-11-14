@@ -58,6 +58,8 @@ class ScanRootStore;
 class ScanRootManagerDialog;
 class PlaybackProgressCoordinator;
 class PlaybackDiagnosticLog;
+class MobilePlaybackService;
+class MobilePlaybackDialog;
 class PlaybackQueuePanel;
 class TitleBarWidget;
 class WindowFrameController;
@@ -112,6 +114,9 @@ private:
 
     QPointer<PlaybackDiagnosticLog> m_playbackDiagnosticLog;
     bool m_diagnosticShutdownFinished = true;
+    MobilePlaybackService *m_mobilePlayback = nullptr;
+    MobilePlaybackDialog *m_mobilePlaybackDialog = nullptr;
+    void showMobilePlayback();
 
     [[nodiscard]] QString updateRestartBlockedReason() const;
     void restartForUpdate(const UpdateDownloadResult &result);
@@ -443,6 +448,7 @@ private:
     void finishCloseIfReady();
     void createSystemTray();
     void configureTabOrder();
+    void showAudioDeviceSettings();
     void showFloatingSubtitleAppearance();
     void applyFloatingSubtitleAppearance(const FloatingSubtitleAppearance &appearance);
     void connectSignals();
@@ -636,6 +642,7 @@ private:
     PlaybackControlsWidget *m_playbackControls = nullptr;
     SubtitlePanel *m_subtitlePanel = nullptr;
     FloatingSubtitleAppearanceDialog *m_floatingAppearanceDialog = nullptr;
+    QDialog *m_audioDeviceSettingsDialog = nullptr;
     QAction *m_toggleFloatingAction = nullptr;
     QAction *m_lockFloatingAction = nullptr;
     QAction *m_floatingAppearanceAction = nullptr;
