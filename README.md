@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/leiding555/AsmrPlayer-Arcanblade/releases/tag/v0.1.0-beta.1"><img src="https://img.shields.io/badge/release-v0.1.0--beta.1-7C5CE7?style=flat-square" alt="Release v0.1.0-beta.1"></a>
+  <a href="https://github.com/leiding555/AsmrPlayer-Arcanblade/releases/tag/v0.1.3"><img src="https://img.shields.io/badge/release-v0.1.3-7C5CE7?style=flat-square" alt="Release v0.1.3"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D4?style=flat-square" alt="平台：Windows 10/11 x64">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0969da?style=flat-square" alt="许可证：MIT"></a>
 </p>
@@ -39,7 +39,7 @@
 
 - **音声作品管理**：导入本地作品，按作品与目录浏览、播放音轨，自动保存播放进度。
 - **同步字幕**：支持 SRT、VTT、LRC，自动匹配本地字幕，可在侧栏或桌面浮窗同步显示。
-- **手机播放**：手机浏览器可浏览作品、在线播放并查看同步字幕，也可批量下载作品离线包并导入手机离线库。
+- **手机播放**：手机浏览器可浏览作品、在线播放并查看同步字幕，也可跨作品选择音轨，一次导出到手机离线库。
 - **离线直译**：日语音频直接生成中文字幕，组件安装后完全离线运行。
 - **作品级上下文润色与翻译**：先在本机识别日文字幕，再由大语言模型参考作品资料或同作品识别结果，润色校正日文并翻译为中文。
 
@@ -61,9 +61,62 @@
 - **批量生成字幕**：在作品音轨列表点击 **批量**，勾选当前目录的多首音轨，再通过 **添加 → 离线直译／日语识别** 批量加入任务。
 - **进入播放详情**：双击音轨开始播放，点击底部播放栏的**封面图片**即可展开播放详情页。当前支持 MP3、WAV 音频。
 - **点击字幕跳转**：播放详情页和侧边字幕中的文字均可点击，直接跳转到对应的音频位置。
-- **手机播放**：进入 **设置 → 手机播放** 并开启共享，在同一可信局域网用手机相机扫描二维码，或在手机浏览器打开所示地址并输入一次性配对码。
+- **手机播放**：参见下方的[手机播放与离线库](#二手机播放与离线库)。
 
-### 二、AI 字幕
+### 二、手机播放与离线库
+
+在 Windows 端打开 **设置 → 手机播放**，即可用手机浏览器播放电脑上的音声和同步字幕。局域网播放期间，电脑需要保持 Arcanblade 运行并开启共享。音轨导入手机离线库后，即使电脑关机、手机断网，也能播放已导入的内容。
+
+#### 1. 设置 Windows 专用网络和防火墙
+
+1. **让电脑和手机连接同一局域网。** 两台设备可以连接同一个家庭 Wi‑Fi，电脑也可以通过网线连接到同一路由器。
+2. **将电脑当前连接的家庭网络设为「专用网络」。** 打开 Windows **设置 → 网络和 Internet**，进入当前连接的 **WLAN（Wi‑Fi）** 或 **以太网** 属性，在 **网络配置文件类型** 中选择 **专用网络**。仅对自己信任的网络使用此设置。 [微软网络设置说明](https://support.microsoft.com/en-us/windows/experience/connectivity-networking/essential-network-settings-and-tasks-in-windows)
+
+   <img src="assets/screenshots/internet2.png" width="720" alt="Windows 网络属性中选中专用网络">
+
+3. **允许 Arcanblade 通过专用网络防火墙。** 首次点击 **开启共享** 时，如果 Windows 弹出提示，只勾选 **专用网络**，然后点击 **允许**。如果此前点过取消，可打开 **Windows 安全中心 → 防火墙和网络保护 → 允许应用通过防火墙 → 更改设置**，为 Arcanblade 勾选 **专用**。如果列表里没有 Arcanblade，点 **允许其他应用…**，选择当前使用的 `Arcanblade.exe`。 [微软防火墙说明](https://support.microsoft.com/en-us/windows/security/windows-security/firewall-and-network-protection-in-the-windows-security-app)
+
+   <img src="assets/screenshots/internet1.png" width="400" alt="Windows 防火墙提示中仅勾选专用网络">
+
+#### 2. 用手机扫码配对
+
+1. 在电脑端打开 **设置 → 手机播放**，在 **网络接口** 中选择手机所在局域网对应的 **WLAN** 或 **以太网**，点击 **开启共享**。
+2. 用手机相机扫描电脑上的二维码，在手机浏览器打开链接。扫码链接会自动配对。如果在微信或 QQ 内打开后看到提示，请把完整链接复制到手机浏览器打开。
+3. 也可以手动配对。在手机浏览器输入电脑窗口显示的 **浏览器地址**，再输入六位 **配对码**，点击 **连接**。二维码和六位码共用一次配对机会，**5 分钟内有效**。用过或过期后，在电脑端点 **换新码**。
+
+   <img src="assets/screenshots/match.png" width="620" alt="手机播放窗口中的配对二维码、浏览器地址和六位配对码">
+
+4. 配对成功后，手机会显示 **作品库**。点开作品并选择一条音轨，即可播放。当前字幕随播放高亮，点击字幕可跳到对应位置。
+
+   <img src="assets/screenshots/phonescreen.jpg" width="250" alt="配对后的手机作品库和导出到离线库入口">
+   <img src="assets/screenshots/phonescreen2.jpg" width="250" alt="手机播放页和随播放高亮的字幕">
+
+如果扫码后网页打不开，先确认电脑仍在共享、网络接口选对了，并检查 Windows 的专用网络及防火墙设置。若手机连的是访客 Wi‑Fi，可换到家里的主 Wi‑Fi 再试。
+
+#### 3. 导出到手机离线库
+
+1. 在手机的局域网 **作品库** 点击 **导出到离线库**。
+2. 勾选整部作品，或点击 **展开** 后只勾选需要的音轨。一次可以选择多部作品。
+3. 点击 **开始导出**。浏览器会打开一个离线库页面，按作品顺序传输和导入所选音轨、对应字幕及封面。导出期间，请保留两个网页并保持电脑共享开启。
+4. 等页面显示导入成功，再在 **离线库** 打开作品试听。确认完成后，可以停止电脑共享。
+
+   <img src="assets/screenshots/offline.jpg" width="250" alt="手机离线库显示导入成功和已保存的音轨">
+
+如果自动导出失败，可在局域网网页打开作品详情，点击 **下载离线包**，选好音轨后点击 **下载压缩包**。下载完成后，打开 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)，点击 **导入离线包**，选择刚下载的 ZIP。确认导入和播放正常后，可以删除下载目录中的 ZIP。
+
+#### 4. 把离线库添加到手机桌面
+
+先在局域网作品库右上角点 **离线库**，或直接打开 [Arcanblade 离线库](https://leiding555.github.io/Arcanblade-offline/)。在显示 **离线库** 的页面执行以下操作。
+
+- **Android（Chrome）**。点浏览器右上角 **⋮ → 安装并创建快捷方式**，按提示完成。不同版本也可能显示 **添加到主屏幕** 或 **安装应用**。 [Chrome 使用说明](https://support.google.com/chrome/answer/9658361?co=GENIE.Platform%3DAndroid&hl=zh-Hans)
+
+  <img src="assets/screenshots/install.jpg" width="250" alt="Chrome 菜单中的安装并创建快捷方式">
+
+- **iPhone（Safari）**。点 **分享 → 添加到主屏幕**。如果显示 **作为网页 App 打开**，开启后点 **添加**。 [Safari 使用说明](https://support.apple.com/zh-cn/guide/iphone/open-as-web-app-iphea86e5236/ios)
+
+添加后，从桌面图标打开离线库，确认已导入的作品可见。可开启飞行模式，试听一条音轨并检查字幕。如果桌面入口看不到作品，用原来导入时的浏览器标签页检查。不同浏览器或不同入口可能使用独立的站点存储。
+
+### 三、AI 字幕
 
 <details>
 <summary><strong>1. 离线直译：音频直接生成中文字幕</strong>（点击展开 / 收起）</summary>
